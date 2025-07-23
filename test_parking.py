@@ -3,102 +3,132 @@ sys.path.append('/mnt/data')
 
 import matplotlib.pyplot as plt
 import numpy as np
-from controller import Vehicle, ParkingController
-from controller import generate_perpendicular_parking_path, generate_parallel_parking_path
+from controller import Vehicle, AdaptiveParkingController
 from matplotlib.patches import Rectangle
 from matplotlib.animation import FuncAnimation
 import matplotlib.transforms as transforms
 
+# Define multiple parking scenarios
 scenarios = [
     {
-        'name': 'Perpendicular Parking',
+        'name': 'Perpendicular: clear',
         'mode': 'perpendicular',
         'spot': {'x': 0.0, 'y': 0.0},
-        'start': {'x': -5.0, 'y': 0.0, 'theta': 0.0},
+        'start': {'x': -8.0, 'y': 0.0, 'theta': 90.0},
         'obstacles': []
     },
     {
-        'name': 'Perpendicular with Obstacles',
+        'name': 'Perpendicular: single obstacle',
         'mode': 'perpendicular',
         'spot': {'x': 0.0, 'y': 0.0},
-        'start': {'x': -6.0, 'y': 0.0, 'theta': 0.0},
-        'obstacles': [(-4.0, 0.5, 0.4), (-3.0, -0.5, 0.3), (-2.0, 0.0, 0.5)]
+        'start': {'x': -8.0, 'y': 1.0, 'theta': np.pi/6},
+        'obstacles': [(-4.0, 0.5, 0.5)]
     },
     {
-        'name': 'Parallel Parking',
+        'name': 'Perpendicular: multiple obstacles',
+        'mode': 'perpendicular',
+        'spot': {'x': 0.0, 'y': 0.0},
+        'start': {'x': -8.0, 'y': -1.0, 'theta': -np.pi/6},
+        'obstacles': [(-6.0, 0.5, 0.5), (-5.0, -0.5, 0.4), (-3.0, 1.0, 0.3)]
+    },
+    {
+        'name': 'Parallel: clear',
         'mode': 'parallel',
         'spot': {'x': 0.0, 'y': 0.0},
-        'start': {'x': 0.0, 'y': 5.0, 'theta': -np.pi/2},
+        'start': {'x': 0.0, 'y': 8.0, 'theta': -np.pi/2},
         'obstacles': []
     },
     {
-        'name': 'Parallel with Obstacles',
+        'name': 'Parallel: obstacle',
         'mode': 'parallel',
         'spot': {'x': 0.0, 'y': 0.0},
-        'start': {'x': 0.0, 'y': 6.0, 'theta': -np.pi/2},
-        'obstacles': [(0.5, 4.0, 0.4), (-0.5, 3.0, 0.3), (0.0, 2.0, 0.5)]
+        'start': {'x': 1.0, 'y': 8.0, 'theta': -np.pi/2},
+        'obstacles': [(0.5, 4.0, 0.5)]
+    },
+    {
+        'name': 'Parallel: multiple obstacles',
+        'mode': 'parallel',
+        'spot': {'x': 0.0, 'y': 0.0},
+        'start': {'x': -1.0, 'y': 8.0, 'theta': -np.pi/2},
+        'obstacles': [(-0.5, 5.0, 0.4), (0.5, 3.0, 0.3), (0.0, 6.0, 0.5)]
     }
 ]
 
 for sc in scenarios:
-    # compute trajectory
-    veh = Vehicle(x=sc['start']['x'], y=sc['start']['y'], theta=sc['start']['theta'])
-    pc = ParkingController(vehicle=veh, obstacles=sc['obstacles'], dt=0.1)
-    history, _ = pc.run(sc['spot'], mode=sc['mode'])
+    print(f"\n=== Scenario: {sc['name']} ===")
 
-    # define goal box centered on spot (1m×1m)
-    gs = 1.0
-    gx = sc['spot']['x'] - gs/2
-    gy = sc['spot']['y'] - gs/2
+    # 1) Initialize vehicle and adaptive parking controller
+    veh = Vehicle(**sc['start'])
+    apc = AdaptiveParkingController(
+        vehicle=veh,
+        obstacles=sc['obstacles'],
+        dt=0.1,
+        v_max=1.0,
+        a_max=0.5,
+        K_acc=2.0,
+        tol=0.1
+    )
 
-    fig, ax = plt.subplots()
+    # 2) Run autonomous parking
+    history, controls = apc.run(sc['spot'], mode=sc['mode'])
+    print(f"Generated {len(history)} steps")
+
+    if len(history) == 0:
+        print("No trajectory — controller may have halted early.")
+        continue
+
+    # 3) Plot setup
+    fig, ax = plt.subplots(figsize=(6,6))
     ax.set_title(sc['name'])
     ax.set_aspect('equal', 'box')
 
-    # draw goal spot
-    goal = Rectangle((gx, gy), gs, gs, facecolor='green', alpha=0.3)
-    ax.add_patch(goal)
-
-    # draw obstacles as blocks
+    # 4) Draw obstacles as blocks
     for cx, cy, r in sc['obstacles']:
-        obs = Rectangle((cx - r, cy - r), 2*r, 2*r,
-                        facecolor='lightcoral', edgecolor='darkred', alpha=0.6)
-        ax.add_patch(obs)
+        ax.add_patch(Rectangle(
+            (cx - r, cy - r), 2*r, 2*r,
+            facecolor='lightcoral', edgecolor='darkred', linewidth=2
+        ))
 
-    # compute axis limits to include history, obstacles, and goal
-    xs = history[:, 0].copy()
-    ys = history[:, 1].copy()
-    # include obstacles extents
-    for cx, cy, r in sc['obstacles']:
-        xs = np.append(xs, [cx - r, cx + r])
-        ys = np.append(ys, [cy - r, cy + r])
-    # include goal extents
-    xs = np.append(xs, [gx, gx + gs])
-    ys = np.append(ys, [gy, gy + gs])
+    # 5) Draw parking spot as green box (1×1 m)
+    gs = 1.0
+    gx, gy = sc['spot']['x'] - gs/2, sc['spot']['y'] - gs/2
+    ax.add_patch(Rectangle(
+        (gx, gy), gs, gs,
+        facecolor='green', alpha=0.3, edgecolor='darkgreen', linewidth=2
+    ))
 
-    xmin, xmax = xs.min(), xs.max()
-    ymin, ymax = ys.min(), ys.max()
+    # 6) Center and zoom axes around approach region
+    ap = 8.0  # max start distance
     pad = 1.0
-    ax.set_xlim(xmin - pad, xmax + pad)
-    ax.set_ylim(ymin - pad, ymax + pad)
+    cx, cy = sc['spot']['x'], sc['spot']['y']
+    if sc['mode'] == 'perpendicular':
+        ax.set_xlim(cx - ap - pad, cx + pad)
+        ax.set_ylim(cy - pad, cy + ap + pad)
+    else:
+        ax.set_xlim(cx - pad, cx + ap + pad)
+        ax.set_ylim(cy - ap - pad, cy + pad)
 
-    # vehicle patch at origin, will be transformed
-    length, width = 0.5, 0.3
-    vehicle_patch = Rectangle((-length/2, -width/2), length, width,
-                              facecolor='blue', edgecolor='none')
+    # 7) Vehicle patch (bigger for visibility)
+    length, width = 1.0, 0.6
+    vehicle_patch = Rectangle(
+        (-length/2, -width/2), length, width,
+        facecolor='blue', edgecolor='navy', linewidth=2
+    )
     ax.add_patch(vehicle_patch)
 
-    # trail line
-    trail, = ax.plot([], [], '-', linewidth=2, color='orange')
+    # 8) Trail line (orange)
+    trail, = ax.plot([], [], '-', lw=3, color='orange')
 
-    # update function for animation
+    # 9) Animation update
     def update(i):
-        x, y, theta = history[i]
-        trail.set_data(history[:i+1, 0], history[:i+1, 1])
-        trans = transforms.Affine2D().rotate(theta).translate(x, y) + ax.transData
+        x, y, th = history[i]
+        trail.set_data(history[:i+1,0], history[:i+1,1])
+        trans = transforms.Affine2D().rotate(th).translate(x, y) + ax.transData
         vehicle_patch.set_transform(trans)
         return vehicle_patch, trail
 
     anim = FuncAnimation(fig, update, frames=len(history),
-                         interval=100, blit=True)
+                         interval=50, blit=True)
+
     plt.show()
+    print(f"Displayed animation for {sc['name']}")
