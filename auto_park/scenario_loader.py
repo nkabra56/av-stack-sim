@@ -16,6 +16,7 @@ class Scenario:
     name: str
     vehicle: Vehicle
     environment: Environment
+    seed: int = 42
 
 
 def load_scenario(name: str) -> Scenario:
@@ -28,7 +29,12 @@ def load_scenario(name: str) -> Scenario:
     vehicle = Vehicle(**data["start"])
     spot = Spot(**data["spot"])
     obstacles = [Obstacle(**o) for o in data.get("obstacles", [])]
-    return Scenario(name=data["name"], vehicle=vehicle, environment=Environment(spot, obstacles))
+    return Scenario(
+        name=data["name"],
+        vehicle=vehicle,
+        environment=Environment(spot, obstacles),
+        seed=data.get("seed", 42),
+    )
 
 
 def list_scenarios() -> list[str]:

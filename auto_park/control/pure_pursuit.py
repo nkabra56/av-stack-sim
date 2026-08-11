@@ -4,7 +4,8 @@ See DESIGN.md section 6.
 
 import numpy as np
 
-from auto_park.vehicle import Vehicle, wrap_angle
+from auto_park.interfaces import HasPose
+from auto_park.vehicle import wrap_angle
 
 
 class PurePursuitAdaptive:
@@ -17,8 +18,8 @@ class PurePursuitAdaptive:
         self.v_max = v_max
         self.max_steer = max_steer
 
-    def control(self, vehicle: Vehicle, path: np.ndarray) -> tuple[float, float]:
-        dists = np.hypot(path[:, 0] - vehicle.x, path[:, 1] - vehicle.y)
+    def control(self, pose: HasPose, path: np.ndarray) -> tuple[float, float]:
+        dists = np.hypot(path[:, 0] - pose.x, path[:, 1] - pose.y)
         nearest = int(np.argmin(dists))
 
         # Search forward from the nearest point, not from index 0: scanning the whole
@@ -30,8 +31,8 @@ class PurePursuitAdaptive:
         target_idx = nearest + ahead[0] if len(ahead) else len(path) - 1
         target_x, target_y = path[target_idx, :2]
 
-        dx, dy = target_x - vehicle.x, target_y - vehicle.y
-        alpha = wrap_angle(np.arctan2(dy, dx) - vehicle.theta)
+        dx, dy = target_x - pose.x, target_y - pose.y
+        alpha = wrap_angle(np.arctan2(dy, dx) - pose.theta)
         delta = np.clip(
             np.arctan2(2 * self.wheelbase * np.sin(alpha), self.lookahead), -self.max_steer, self.max_steer
         )

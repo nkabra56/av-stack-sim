@@ -17,7 +17,8 @@ length (6-8 steps) and control rate (10 Hz).
 import numpy as np
 from scipy.optimize import minimize
 
-from auto_park.vehicle import Vehicle, wrap_angle
+from auto_park.interfaces import HasPose
+from auto_park.vehicle import wrap_angle
 
 
 class MPCController:
@@ -58,8 +59,8 @@ class MPCController:
             xs[k], ys[k], thetas[k] = x, y, theta
         return xs, ys, thetas
 
-    def _reference(self, vehicle: Vehicle, path: np.ndarray) -> np.ndarray:
-        dists = np.hypot(path[:, 0] - vehicle.x, path[:, 1] - vehicle.y)
+    def _reference(self, pose: HasPose, path: np.ndarray) -> np.ndarray:
+        dists = np.hypot(path[:, 0] - pose.x, path[:, 1] - pose.y)
         nearest = int(np.argmin(dists))
 
         seg = np.diff(path[:, :2], axis=0)
@@ -80,15 +81,15 @@ class MPCController:
         cost += self.w_smooth * np.sum(du**2)
         return cost
 
-    def control(self, vehicle: Vehicle, path: np.ndarray) -> tuple[float, float]:
-        ref = self._reference(vehicle, path)
+    def control(self, pose: HasPose, path: np.ndarray) -> tuple[float, float]:
+        ref = self._reference(pose, path)
         u0 = self._warm_start if self._warm_start is not None else np.zeros(2 * self.horizon)
         bounds = [(-self.v_max, self.v_max), (-self.delta_max, self.delta_max)] * self.horizon
 
         result = minimize(
             self._cost,
             u0,
-            args=(vehicle.x, vehicle.y, vehicle.theta, ref),
+            args=(pose.x, pose.y, pose.theta, ref),
             method="SLSQP",
             bounds=bounds,
             options={"maxiter": self.maxiter, "ftol": 1e-4},

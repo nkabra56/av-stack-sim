@@ -3,3 +3,4 @@ name: "Parallel: open curb"
 spot: {x: 0.0, y: 0.0, theta: -1.5707963267948966, size: 2.6}   # theta = -pi/2, facing along the curb
 start: {x: 0.0, y: 10.0, theta: -1.5707963267948966, wheelbase: 2.7}
 obstacles: []
+seed: 42

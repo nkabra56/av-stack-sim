@@ -13,40 +13,66 @@ and control** stack of an autonomous parking system end-to-end in simulation:
   didn't already account for (e.g. re-plan or brake).
 - **Visualize** the result as an animated top-down view, suitable for a GIF.
 
-Explicitly out of scope: perception (obstacles are given as ground-truth geometry, not detected
-from raw sensor data), localization error (the vehicle's pose is known exactly), 3D/terrain, and
-multi-agent/dynamic traffic. This is a planning+control simulation, not a full AV stack — that
-scope boundary is deliberate so the project stays focused on the algorithms it's meant to
-showcase rather than becoming a shallow attempt at everything.
+Explicitly out of scope: mapping/SLAM (the environment's obstacle positions are known/mapped in
+advance — the vehicle localizes against them, it doesn't build the map), 3D/terrain, and
+multi-agent/dynamic traffic. Localization error is *not* out of scope, unlike an earlier version
+of this document said — see Section 5. This is a planning+control+estimation simulation, not a
+full AV stack — that scope boundary is deliberate so the project stays focused on the algorithms
+it's meant to showcase rather than becoming a shallow attempt at everything.
 
 ## 2. System architecture
 
+The system is a small **pub/sub node graph** (topics + typed messages, no real ROS2 dependency)
+rather than one component calling the next directly:
+
 ```mermaid
 flowchart LR
-    Env[Environment<br/>spot + obstacles] --> Sim[Simulation loop]
-    Sensor[Ultrasonic Array] --> Sim
-    Planner[Planner<br/>Dubins now / Hybrid A* + Reeds-Shepp next] --> Sim
-    Controller[Controller<br/>Pure Pursuit / MPC] --> Sim
-    Sim --> Vehicle[Vehicle<br/>kinematic bicycle model]
-    Vehicle --> Sensor
-    Vehicle --> Viz[Visualization<br/>matplotlib animation]
-    Sim -.brakes on detection today,<br/>re-plans in M2.-> Planner
+    VN[VehicleNode<br/>ground truth + odometry] -- true_state --> SN[SensorNode]
+    VN -- odometry --> EN[EstimatorNode<br/>EKF]
+    SN -- compass --> EN
+    SN -- position_fix --> EN
+    SN -- landmark_bearings --> EN
+    EN -- pose_estimate --> PN[PlannerNode<br/>Dubins now / Hybrid A* next]
+    EN -- pose_estimate --> CN[ControllerNode<br/>Pure Pursuit / MPC]
+    PN -- path --> CN
+    SN -- obstacle_ranges --> CN
+    CN -- control_cmd --> VN
 ```
 
-The simulation loop is the only component that knows about all the others; every other module
-only depends on plain data (poses, paths, obstacle lists) so planner and controller
-implementations are swappable without touching the loop:
+Two properties of this graph matter more than the fact that it's "pub/sub" at all:
 
-1. **Environment** holds the parking spot geometry and static obstacles.
-2. **Planner** computes a path once, up front, from the vehicle's start pose to the spot,
-   respecting the vehicle's turning constraints and the known obstacles.
-3. **Simulation loop**, each timestep:
-   a. Queries the **sensor** for ranges to nearby obstacles.
-   b. Passes the current pose + path to the **controller**, gets back `(v, delta)`.
-   c. If the sensor detects something the planner didn't know about, triggers a re-plan instead
-      of just braking.
-   d. Advances the **vehicle** state by one timestep.
-4. **Visualization** consumes the recorded pose history after the fact and renders it.
+- **`true_state` is subscribed only by `SensorNode` and the harness's own evaluation logic** —
+  never by the estimator, planner, or controller. That's the perception/reality boundary made
+  structural rather than a comment: a real vehicle doesn't get to peek at its own ground-truth
+  pose either, and nothing in this codebase can accidentally do so without adding a new
+  subscription to a topic named `true_state`, which is easy to grep for and easy to review against.
+- **Nodes only ever reference topic names and message types, never each other directly.** Adding
+  a new planner or controller means writing a class that satisfies `Planner`/`Controller`
+  (`interfaces.py`) and wrapping it in the corresponding node — nothing else in the graph changes.
+
+Dispatch (`auto_park/messaging/bus.py`) is **synchronous and immediate**: `publish()` calls every
+subscriber callback directly, in registration order, no threads or async queue. A real ROS2 graph
+runs concurrently with nondeterministic message timing; this simulation trades that realism for
+determinism, because reproducible tests and reproducible demo GIFs matter more here than
+faithfully modeling DDS scheduling. That's a deliberate tradeoff, not a missing feature.
+
+**Per tick** (`harness.py`), in a fixed order:
+
+1. `VehicleNode` applies the previous tick's `control_cmd` to the real `Vehicle`, publishes
+   `true_state` and noisy `odometry`. Publishing `odometry` synchronously triggers an EKF predict
+   inside `EstimatorNode`, which republishes `pose_estimate` — which, on the very first tick,
+   also triggers `PlannerNode` to plan once (see Section 6).
+2. `SensorNode` (having received `true_state`) publishes `obstacle_ranges`, an always-on noisy
+   `compass` reading, and — when due — a `position_fix` and/or `landmark_bearings`. Each of these
+   synchronously triggers a further EKF correction and `pose_estimate` republish.
+3. `ControllerNode.step()` is called explicitly by the harness (not reactively) exactly once,
+   using the freshest `pose_estimate`/`path`/`obstacle_ranges` available, and publishes exactly
+   one `control_cmd` for the *next* tick. This keeps "one control decision per tick" well-defined
+   even though `pose_estimate` is republished several times a tick.
+
+The harness itself subscribes to `true_state`, `pose_estimate`, and `path` purely to record
+history for evaluation and visualization — it participates in the graph the same way any other
+node would, it just happens to also be allowed to see ground truth.
 
 ## 3. Vehicle model
 
@@ -75,19 +101,74 @@ significant complexity for a regime (parking-lot speeds, <2 m/s) where it wouldn
 resulting paths enough to matter. This is called out explicitly here rather than left implicit,
 since "why not the more complex model" is the kind of question this doc should pre-empt.
 
+Acceleration limiting (bounding how fast commanded speed can actually change, `a_max`) and
+steering clamping to `max_steer` both live in `VehicleNode`, not in any controller. They're
+physical actuator limits of the plant, not part of a control law — a controller is free to
+command an unreachable `v_desired` or an over-limit `delta`; `VehicleNode` is what enforces what
+the vehicle can actually do about it. Keeping that enforcement in exactly one place, rather than
+duplicated in every controller, is what makes it trustworthy: no controller can silently bypass it.
+
 ## 4. Sensor model
 
-A simulated ultrasonic array: a fixed set of beam angles relative to the vehicle heading, each
-cast as a ray against the obstacle set. Obstacles are circles (parametrized by center + radius),
-so each beam's distance is the closest ray/circle intersection, computed analytically via the
-quadratic formula rather than by discretized ray-marching (cheaper, exact, and simple to unit
-test against hand-computed cases).
+A simulated ultrasonic array (`obstacle_ranges`): a fixed set of beam angles relative to the
+vehicle heading, each cast as a ray against the obstacle set. Obstacles are circles (parametrized
+by center + radius), so each beam's distance is the closest ray/circle intersection, computed
+analytically via the quadratic formula rather than by discretized ray-marching (cheaper, exact,
+and simple to unit test against hand-computed cases). Each beam returns `max_range` if no obstacle
+is hit; `ControllerNode` brakes when the closest reading across all beams drops below
+`brake_distance`.
 
-Each beam returns `max_range` if no obstacle is hit. Stretch goal: additive Gaussian noise on
-returned ranges, to make the "does the controller handle noisy sensing" question meaningful —
-noted here as a future extension (Section 9), not required for the core project.
+Three more sensors, all noisy, feed the estimator (Section 5) rather than the controller directly:
+a `compass` (heading only, always on, every tick), a low-rate `position_fix` (x, y only), and
+opportunistic `landmark_bearings` against known obstacles. See Section 5 for why each exists and
+what it corrects.
 
-## 5. Path planning
+## 5. State estimation
+
+**The vehicle's controller and planner never see ground truth.** Everything they act on comes
+from an Extended Kalman Filter (`auto_park/estimation/ekf.py`) that fuses noisy odometry and
+three noisy sensor types into a `[x, y, theta]` pose estimate with covariance. This is the classic
+"odometry + periodic absolute correction" mobile-robot localization pattern (Thrun, Burgard & Fox,
+*Probabilistic Robotics*, ch. 7) — localization, not SLAM: obstacle/landmark positions are assumed
+known in advance (they come straight from `Environment`), the filter only estimates the vehicle's
+own pose against them.
+
+**Predict** (every tick, driven by noisy odometry — not the commanded control, which is what
+makes this dead reckoning): propagate the mean through the same nonlinear bicycle-model equations
+as `Vehicle.update`, linearized via its state Jacobian `F`. Process noise uses the
+**control-dependent "velocity motion model"** formulation (same reference, ch. 5) rather than a
+fixed, arbitrarily-sized `Q`: `Q = V @ M @ Vᵀ`, where `M` is the odometry noise covariance and
+`V = df/d(v, delta)` is the motion model's Jacobian with respect to its *inputs*. This ties how
+fast uncertainty grows during prediction directly to how noisy the odometry actually is, instead
+of guessing a growth rate independently of the sensor supposedly driving it — the difference
+matters: an arbitrary fixed `Q` would grow (or shrink) the ellipse in Section "Visualization"
+without any real connection to the odometry noise parameters it's sitting next to in the config.
+
+**Correct**, three independent measurement types, each with a linear or linearized `H`:
+
+- **Compass** (`H = [0, 0, 1]`, every tick): keeps heading from drifting unboundedly even with
+  zero landmarks in view. Without this, the two obstacle-free scenarios (nothing to take a
+  landmark bearing on) would have no heading correction at all and would likely fail once noise
+  entered the loop — this was in fact observed while building it (see Section 7).
+- **Position fix** (`H = [[1,0,0],[0,1,0]]`, every ~10 ticks, moderate noise): models a
+  garage-style RTLS/UWB-anchor fix, a real deployed technique for indoor/garage vehicle
+  localization — not an implausible "GPS in a parking garage." Rank-deficient by design (doesn't
+  observe heading) — a genuine partial-observability setup, not a toy one.
+- **Landmark range-bearing** (nonlinear `h(x, landmark)`, standard range-bearing Jacobian,
+  opportunistic — only when an obstacle is within sensor range): what makes this a genuine
+  sensor-fusion EKF rather than a linear Kalman filter wearing an EKF's name — both the
+  *prediction* and (for this measurement type) the *correction* step are nonlinear.
+
+**Collision and success are always evaluated against true state**, in the harness — never against
+the estimate. The estimate is what the vehicle acts on; "did it actually hit something" has to be
+ground truth, or the test suite would be validating the filter's honesty about its own errors
+instead of actual safety.
+
+Initial pose is assumed roughly known (`x0` = true start pose, with a modest initial covariance,
+not zero) — a common simplifying assumption that distinguishes ordinary localization/tracking
+from the harder "kidnapped robot" global relocalization problem, which is out of scope here.
+
+## 6. Path planning
 
 ### What's built now: Dubins paths
 
@@ -110,7 +191,7 @@ there was nothing to successfully track. Dubins paths are built from exactly two
 vehicle's real turning radius plus a straight segment, so curvature is always either 0 or exactly
 `1 / turning_radius`, never more — every generated path is drivable by construction, not by luck.
 This is the kind of bug that's easy to miss by eyeballing a plotted curve and only shows up once
-you check curvature against the vehicle's actual limits, which is why Section 7 calls this out
+you check curvature against the vehicle's actual limits, which is why Section 8 calls this out
 as a design decision rather than leaving it implicit.
 
 ### What's next: Hybrid A* + Reeds-Shepp (M2)
@@ -138,9 +219,12 @@ Alternatives considered:
   Bezier curve was: it can't express "go around an obstacle in the way," only "stop in front of
   it."
 
-## 6. Control
+## 7. Control
 
-Two controllers, presented as a deliberate comparison rather than a single "best" choice:
+Two controllers, presented as a deliberate comparison rather than a single "best" choice. Both
+act purely on `pose_estimate`, never on ground truth — `Controller.control()` takes anything with
+`.x/.y/.theta` (`interfaces.HasPose`), so the same controller code runs unchanged whether it's
+handed a real `Vehicle` or a `PoseEstimateMsg`.
 
 | | Pure Pursuit (adaptive) | MPC |
 |---|---|---|
@@ -152,7 +236,7 @@ Two controllers, presented as a deliberate comparison rather than a single "best
 
 This comparison isn't just theoretical — running both controllers on the same Dubins paths
 surfaced a real, measurable difference. A Dubins path sits *exactly* at the vehicle's curvature
-limit by construction (Section 5), which leaves Pure Pursuit's reactive steering law zero margin:
+limit by construction (Section 6), which leaves Pure Pursuit's reactive steering law zero margin:
 any small lookahead-target misalignment demands more curvature than the vehicle can provide,
 steering saturates, and on the tighter perpendicular-parking scenario Pure Pursuit overshoots
 into a near-360-degree loop before recovering. MPC, by rolling out the actual dynamics over a
@@ -161,13 +245,26 @@ after the fact, converges directly with no overshoot. Both controllers succeed r
 scenarios with a clear path to the spot; the gap shows up specifically where the path is
 curvature-saturated, which is exactly the regime the comparison table above predicts.
 
+Once estimation noise entered the loop (Section 5), the same gap showed up again in a second
+form: Pure Pursuit's near-goal behavior settles into a small, persistent limit cycle (a known
+Pure Pursuit property — the lookahead target snaps to the final path point once everything's
+within `lookahead`, so the vehicle orbits it rather than converging exactly onto it), and with
+noisy position feedback that cycle's radius is comparable to the original success tolerance.
+That's why `tol` is 0.4 m (loosened from a pre-estimation 0.3 m) and why the test suite evaluates
+success as a **rate across 5 seeds**, not single-run determinism — asserting a threshold instead
+of 100% is the statistically honest way to validate a controller under real sensor noise, rather
+than picking a lucky seed and calling it done.
+
 Pure Pursuit remains the default/baseline (it's simple, fast, and easy to reason about). MPC is
 selectable per scenario via `demo.py --controller mpc`.
 
-## 7. Design decisions & alternatives considered
+## 8. Design decisions & alternatives considered
 
 - **Kinematic vs. dynamic bicycle model**: kinematic, see Section 3.
-- **Hybrid A\* vs. RRT\***: Hybrid A*, see Section 5.
+- **Hybrid A\* vs. RRT\***: Hybrid A*, see Section 6.
+- **Control-dependent EKF process noise vs. a fixed Q**: see Section 5.
+- **Synchronous pub/sub dispatch vs. a real async executor**: determinism over realistic timing,
+  see Section 2.
 - **Grid resolution for Hybrid A\***: coarser cells reduce search time but risk missing narrow
   gaps between obstacles; the implementation should expose this as a tunable parameter rather
   than a hardcoded constant, since the right value is scenario-dependent.
@@ -180,19 +277,33 @@ selectable per scenario via `demo.py --controller mpc`.
   still can't decelerate fast enough to avoid it. An earlier, arbitrarily-chosen smaller value
   produced exactly that: real collisions in scenarios the vehicle should have safely stalled in.
 
-## 8. Known limitations & assumptions
+## 9. Known limitations & assumptions
 
 - Obstacles are static for the duration of a scenario (no moving pedestrians/cars).
-- The vehicle's pose is known exactly — no localization noise or drift.
+- Localization, not SLAM: landmark (obstacle) positions are assumed known in advance. The vehicle
+  estimates its own pose against a known map; it doesn't build one.
+- Single-hypothesis estimation: the EKF assumes a unimodal Gaussian belief. A genuinely ambiguous
+  situation (e.g. two landmarks that look identical from certain angles) isn't modeled — that's
+  what particle filters are for, and it's an explicit non-goal here (Section 10).
+- No sensor dropout/failure modeling — every sensor is assumed to report every tick it's due,
+  possibly noisy but never missing or stale.
 - 2D, flat ground plane only.
 - Obstacles are approximated as circles, which over-estimates the footprint of non-circular
   obstacles (a conservative simplification, not a correctness bug).
 
-## 9. Future extensions
+## 10. Future extensions
 
 - Learned parking policy (RL, e.g. trained via a simple gym-style wrapper around the simulation)
   compared against the planner+controller baseline.
 - Dynamic obstacles (other vehicles, pedestrians) requiring re-planning mid-maneuver.
-- Sensor noise model (Section 4) to test controller robustness under uncertainty.
-- ROS2 bridge, to run the same planner/controller nodes against a Gazebo/Isaac Sim vehicle
-  instead of the built-in kinematic simulator.
+- Sensor dropout/latency modeling, to test the estimator's (and controller's) robustness when a
+  measurement is late or simply doesn't arrive, not just when it's noisy.
+- Particle filter or UKF as an alternative to the EKF, for a genuine multi-modal or
+  strongly-nonlinear comparison point (the EKF's linearization is a fine approximation at these
+  turning rates, but it's an approximation, and demonstrating *why* it's usually good enough here
+  — rather than just asserting it — would be a stronger claim than the current filter-consistency
+  test alone provides).
+- ROS2 bridge: the node/topic boundaries in `auto_park/nodes/` and `auto_park/messaging/` were
+  drawn deliberately close to how a real ROS2 graph would be structured, specifically so that
+  swapping the in-process `Bus` for real ROS2 topics later wouldn't require redesigning the nodes
+  themselves — only how they publish/subscribe.

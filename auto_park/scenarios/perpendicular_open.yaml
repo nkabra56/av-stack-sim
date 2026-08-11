@@ -3,3 +3,4 @@ name: "Perpendicular: open lane"
 spot: {x: 0.0, y: 0.0, theta: 1.5707963267948966, size: 2.75}   # theta = pi/2, facing into the stall
 start: {x: -10.0, y: 0.0, theta: 0.0, wheelbase: 2.7}            # facing east down the drive aisle
 obstacles: []
+seed: 42  # RNG seed for odometry/sensor noise, for reproducible demo runs and tests

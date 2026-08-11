@@ -9,3 +9,4 @@ start: {x: 1.8, y: 10.0, theta: -1.5707963267948966, wheelbase: 2.7}
 obstacles:
   - {x: 0.0, y: 5.5, radius: 1.3}    # parked car ahead of the stall
   - {x: 0.0, y: -5.5, radius: 1.3}   # parked car behind the stall
+seed: 42
