@@ -103,3 +103,85 @@ def test_filter_stays_bounded_near_truth_over_many_cycles():
         max_error = max(max_error, error)
 
     assert max_error < 1.0
+
+
+def _speed_ekf(x0=(0.0, 0.0, 0.0, 20.0), p0_scale=0.05, accel_std=0.15, r_speed=0.2**2):
+    return ExtendedKalmanFilter(
+        x0=np.array(x0),
+        p0=np.eye(4) * p0_scale,
+        wheelbase=2.7,
+        odom_v_std=0.0,
+        odom_delta_std=0.0,
+        r_heading=1.0,
+        r_position=np.eye(2),
+        r_landmark=np.eye(2),
+        r_speed=r_speed,
+        accel_std=accel_std,
+    )
+
+
+def test_3state_ekf_behavior_is_unchanged_by_the_4state_extension():
+    """The generalization of _apply_update/update_heading/update_position/
+    update_landmark to be dimension-agnostic (len(self.x) instead of a hardcoded 3)
+    must produce numerically identical results for the original 3-state case --
+    this is the regression guard for that refactor, on top of the unchanged
+    KITTI-validation RMSE already checked manually."""
+    ekf = _ekf(p0_scale=1.0)
+    ekf.predict(v=1.0, delta=0.2, dt=0.1)
+    ekf.update_heading(0.05)
+    ekf.update_position(0.3, -0.2)
+    assert len(ekf.x) == 3
+    assert ekf.p.shape == (3, 3)
+
+
+def test_predict_with_speed_state_matches_closed_form_constant_acceleration():
+    """v update (v += accel*dt each step) is exact for constant acceleration -- Euler
+    integration of a linear ODE has no discretization error. x update (x += v*dt using
+    v from the *start* of the step) is a left-Riemann-sum approximation of the true
+    integral though, so it systematically undershoots for accelerating motion -- same
+    Euler-discretization tolerance test_vehicle.py's turning-radius test already needs
+    for the same underlying reason, not a bug in either place."""
+    dt = 0.1
+    accel = 2.0
+    ekf = _speed_ekf(x0=(0.0, 0.0, 0.0, 10.0), accel_std=0.0)
+    for _ in range(50):
+        ekf.predict_with_speed_state(accel=accel, delta=0.0, dt=dt)
+
+    t = 50 * dt
+    expected_v = 10.0 + accel * t
+    expected_x = 10.0 * t + 0.5 * accel * t**2
+    assert ekf.x[3] == pytest.approx(expected_v, abs=1e-6)
+    assert ekf.x[0] == pytest.approx(expected_x, abs=1.0)
+    assert ekf.x[1] == pytest.approx(0.0, abs=1e-9)  # straight line, no lateral motion
+
+
+def test_update_speed_reduces_covariance():
+    ekf = _speed_ekf(p0_scale=1.0)
+    trace_before = np.trace(ekf.p)
+    ekf.update_speed(21.0)
+    assert np.trace(ekf.p) < trace_before
+
+
+def test_speed_state_stays_bounded_near_truth_over_many_cycles():
+    """Same style of check as test_filter_stays_bounded_near_truth_over_many_cycles,
+    for the 4-state speed-estimating mode: predict on noisy acceleration, correct on
+    a noisy speedometer, verify the fused estimate tracks true speed."""
+    rng = np.random.default_rng(11)
+    dt = 0.1
+    accel_std, speedometer_std = 0.15, 0.2
+
+    true_v = 20.0
+    ekf = _speed_ekf(x0=(0.0, 0.0, 0.0, 20.0), accel_std=accel_std, r_speed=speedometer_std**2)
+
+    max_error = 0.0
+    for step in range(200):
+        true_accel = 0.5 if step < 100 else -0.5
+        true_v = max(0.0, true_v + true_accel * dt)
+
+        accel_meas = true_accel + rng.normal(0, accel_std)
+        ekf.predict_with_speed_state(accel_meas, delta=0.0, dt=dt)
+        ekf.update_speed(true_v + rng.normal(0, speedometer_std))
+
+        max_error = max(max_error, abs(ekf.x[3] - true_v))
+
+    assert max_error < 2.0

@@ -112,3 +112,26 @@ class RadarMsg:
 @dataclass(frozen=True)
 class LongitudinalCmdMsg:
     accel: float  # m/s^2
+
+
+# --- H2: fused ego speed for the highway mode. AccelOdometryMsg/SpeedometerMsg are
+# noisy sensor readings (like OdometryMsg/CompassMsg for parking); EgoSpeedEstimateMsg
+# is what AccControllerNode actually acts on -- the ego's own true speed
+# (EgoLongitudinalStateMsg) stays visible only to RadarNode and the harness's
+# evaluation logic, same ground-truth boundary as everywhere else in this project.
+
+
+@dataclass(frozen=True)
+class AccelOdometryMsg:
+    accel: float  # m/s^2, noisy reading of the actually-applied acceleration
+
+
+@dataclass(frozen=True)
+class SpeedometerMsg:
+    speed: float  # m/s, noisy
+
+
+@dataclass(eq=False)
+class EgoSpeedEstimateMsg:
+    speed: float
+    covariance: np.ndarray  # (4, 4), the full state covariance (position/heading unused by H1)

@@ -422,12 +422,35 @@ not a strict target, since the real driver isn't assumed optimal).
 
 ## 12. Highway-mode roadmap (H2-H4)
 
-- **H2 — Sensor fusion: extend the EKF with a speed state.** Add ego speed as a fourth estimated
-  state (`[x, y, theta, v]`) rather than treating it as a pure odometry input the way the parking
-  EKF does — fuse a noisy speedometer measurement the same way `update_heading`/`update_position`
-  already work. Directly motivated by H1/H3: both currently use *true* ego speed (Section 11
-  notes this explicitly as H1's scope boundary), and a fused, corrected estimate is what a real
-  system would actually have.
+- **H2 — Sensor fusion: extend the EKF with a speed state: done.** Added `predict_with_speed_state`
+  and `update_speed` to `ExtendedKalmanFilter` as new methods alongside the original 3-state
+  `predict` (left completely untouched, on purpose — see below), giving a `[x, y, theta, v]` mode
+  where speed is fused from noisy acceleration odometry + a noisy speedometer, rather than
+  (Section 11's H1 scope note) being read as ground truth. `AccControllerNode` now consumes
+  `EgoSpeedEstimateMsg` (the fused estimate) instead of true speed for its own speed input — the
+  ego's true state is now visible only to `RadarNode` and the harness's evaluation logic, same
+  boundary as the rest of the project. Effect on outcomes: both ACC controllers' realized minimum
+  gap on the NGSIM validation shifted by only ~4-8 cm (IDM 2.00→1.96 m, MPC 2.52→2.44 m) —
+  estimation noise at these levels doesn't meaningfully erode the safety margin already built in
+  from Section 11's `min_gap` finding.
+
+  **Design choice**: rather than rewrite `predict()` to take acceleration instead of speed (which
+  would risk the parking mode's already-validated 3-state path — 83% RMSE reduction against real
+  KITTI data, per IMPLEMENTATION.md's MV milestone), the 4-state mode is purely additive: two new
+  methods, plus generalizing `_apply_update`/`update_heading`/`update_position`/`update_landmark`
+  to size themselves off `len(self.x)` instead of a hardcoded 3 (so they keep working unchanged
+  for a 4-state instance). Verified as a true zero-behavior-change refactor for the 3-state case
+  by re-running the full existing EKF test suite *and* the KITTI validation and checking the RMSE
+  numbers came back bit-for-bit identical (0.845 m / 4.966 m / 83.0%), not just "tests still
+  green" — a green test suite proves the tested paths didn't change, not that nothing did.
+
+  For H1's straight-line-only case, the 4-state filter's `x`/`y`/`theta` dimensions are
+  degenerate (heading stays 0, no lateral motion) — reusing the general filter here rather than
+  building a separate 1D linear Kalman filter (which would be more "correct" for this specific
+  subproblem, since 1D constant-acceleration motion is linear and doesn't need an EKF's
+  linearization at all) is a deliberate forward-compatibility tradeoff: H3 needs the full state
+  anyway, and building a throwaway 1D filter just for H1 would mean redoing this integration work
+  a second time.
 - **H3 — Lane centering.** Stanley controller (`delta = heading_error + atan2(k *
   cross_track_error, v)`) — the classical lane-keeping law, playing the same "geometric baseline"
   role Pure Pursuit and IDM play elsewhere. Lane geometry derived from NGSIM's per-lane position

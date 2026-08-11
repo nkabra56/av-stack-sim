@@ -2,11 +2,11 @@
 
 This is the build spec for the architecture described in [DESIGN.md](DESIGN.md). Parking-mode
 milestones M1 (correct baseline), the control half of M3 (MPC), ME (state estimation + pub/sub
-architecture), and MV (real-data EKF validation against KITTI) are done. Highway-mode milestone
-**H1 (adaptive cruise control)** is also done, validated against real NGSIM data — the sections
-below reflect what's actually in the repo today, not just what was planned. Two things are next:
-parking's M2 (Hybrid A* + Reeds-Shepp obstacle routing) and highway's H2 (extend the EKF with a
-speed state) — see Section 3 for the full roadmap on both sides.
+architecture), and MV (real-data EKF validation against KITTI) are done. Highway-mode milestones
+**H1 (adaptive cruise control)** and **H2 (fused ego speed via an extended EKF)** are also done —
+the sections below reflect what's actually in the repo today, not just what was planned. Two
+things are next: parking's M2 (Hybrid A* + Reeds-Shepp obstacle routing) and highway's H3 (lane
+centering) — see Section 3 for the full roadmap on both sides.
 
 ## 1. Directory structure
 
@@ -20,12 +20,16 @@ auto_park/
   messaging/
     __init__.py
     bus.py             # Bus: synchronous publish/subscribe
-    messages.py          # TrueStateMsg, OdometryMsg, CompassMsg, PositionFixMsg,
+    messages.py          # parking: TrueStateMsg, OdometryMsg, CompassMsg, PositionFixMsg,
                        # LandmarkBearingMsg, ObstacleRangeMsg, PoseEstimateMsg, PathMsg,
-                       # ControlCmdMsg -- see DESIGN.md section 2
+                       # ControlCmdMsg -- highway: LeadVehicleStateMsg, EgoLongitudinalStateMsg,
+                       # RadarMsg, LongitudinalCmdMsg, AccelOdometryMsg, SpeedometerMsg,
+                       # EgoSpeedEstimateMsg -- see DESIGN.md section 2
   estimation/
     __init__.py
-    ekf.py             # ExtendedKalmanFilter: predict + 3 correction types, see DESIGN.md section 5
+    ekf.py             # ExtendedKalmanFilter: predict + 3 correction types (3-state, parking) +
+                       # predict_with_speed_state/update_speed (4-state, H2/highway), see
+                       # DESIGN.md section 5 and section 12's H2 entry
   validation/
     __init__.py
     kitti_loader.py       # parses KITTI poses.txt -> KittiSequence(times,x,y,theta,v,yaw_rate)
@@ -49,9 +53,12 @@ auto_park/
     planner_node.py       # wraps Planner, plans once off the first pose_estimate
     controller_node.py     # wraps Controller, one control_cmd per tick via explicit step()
     lead_vehicle_node.py    # replays a real recorded lead-vehicle trajectory tick by tick
-    ego_longitudinal_node.py # 1D point-mass ego state for the longitudinal-only ACC mode
+    ego_longitudinal_node.py # 1D point-mass ego state; also publishes noisy accel_odometry/
+                       # speedometer readings (H2) for SpeedEstimatorNode to fuse
     radar_node.py         # noisy bumper-to-bumper range + range-rate to the lead vehicle
-    acc_controller_node.py   # wraps an ACC controller, one accel command per tick
+    speed_estimator_node.py  # wraps the EKF's 4-state mode, publishes ego_speed_estimate (H2)
+    acc_controller_node.py   # wraps an ACC controller; acts on the fused speed estimate
+                       # (not true speed), one accel command per tick
   harness.py            # tick-based executor (parking mode): owns the Bus, builds all 5 nodes
   highway_harness.py       # tick-based executor (ACC/H1 mode): owns the Bus, builds the 4
                        # longitudinal nodes -- mirrors harness.py's structure, kept separate
@@ -198,8 +205,19 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   explicit physical deceleration floor (caught by a standalone unit test before any node existed
   to catch it later), and nominal MPC's hard gap constraint can still be violated in a
   standstill-recovery edge case (fixed by picking `min_gap` from measured real-world erosion, not
-  from what looks right on paper). M2 (below) and H2 (DESIGN.md section 12) are next, in either
-  order — they're independent.
+  from what looks right on paper).
+- **H2 — Sensor fusion, extend the EKF with a speed state: done.** `estimation/ekf.py` gained
+  `predict_with_speed_state`/`update_speed` (4-state `[x,y,theta,v]` mode) as new methods
+  alongside the original `predict` (left untouched); `_apply_update` and the three `update_*`
+  correction methods were generalized to size off `len(self.x)` instead of a hardcoded 3, verified
+  as a true no-behavior-change refactor by re-checking the KITTI validation's RMSE came back
+  bit-for-bit identical (0.845 m / 4.966 m / 83.0%). New `speed_estimator_node.py` wraps the
+  4-state filter; `AccControllerNode` now acts on the fused `EgoSpeedEstimateMsg`, not true speed.
+  Effect on H1's outcomes: realized minimum gap shifted by only 4-8 cm — see DESIGN.md section 12
+  for the full account, including why H1's use of the 4-state filter has two degenerate
+  dimensions (x/y/theta don't do much until H3 adds real lateral motion) and why that's an
+  accepted forward-compatibility tradeoff, not an oversight. M2 (below) and H3 (DESIGN.md section
+  12) are next, in either order — they're independent.
 - **M2 — Planning (next up)**: implement `reeds_shepp.py`, then `hybrid_astar.py` on top of it;
   replace the fixed Dubins path with Hybrid A* as the default planner, planning from the pose
   *estimate* (already how `PlannerNode` is wired — no further node changes needed). Validate
@@ -214,11 +232,11 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   trajectory, a covariance ellipse, and the planned path (landed as part of ME, since the whole
   point of adding an estimator is visible directly in that comparison). Still open: a genuinely
   multi-panel layout (live sensor readings, speed profile) alongside the top-down view.
-- **M6 — Tests & CI**: 87 tests across both modes run in ~22s; no GitHub Actions workflow yet.
+- **M6 — Tests & CI**: 91 tests across both modes run in ~21s; no GitHub Actions workflow yet.
 
 ## 4. Testing strategy
 
-Current (87 tests, ~22s):
+Current (91 tests, ~21s):
 
 - Kinematic checks: driving straight for N steps moves `x` by `v*N*dt` with `theta` unchanged; a
   fixed steering angle over time traces a circle of radius `L / tan(delta)`; `turning_radius`
@@ -231,9 +249,9 @@ Current (87 tests, ~22s):
   with fixed-seed bounded noise, estimation error stays bounded (a filter-consistency check, not
   just "it runs").
 - Integration, parametrized over both controllers, run against `ParkingHarness`: on the two
-  obstacle-free scenarios, assert a **success rate ≥4/5 across 5 fixed seeds** (not single-run
+  obstacle-free scenarios, assert a **success rate â‰¥4/5 across 5 fixed seeds** (not single-run
   determinism — Section "Control" tradeoffs in DESIGN.md explains why a rate, not 100%, is the
-  right thing to assert once real noise is in the loop). On *every* scenario × controller × seed
+  right thing to assert once real noise is in the loop). On *every* scenario Ã— controller Ã— seed
   (50 combinations), assert not `.collision` — safety has to hold regardless of estimation noise,
   including on the three scenarios that aren't expected to reach the spot.
 - Regression guard for the original degrees/radians bug: every scenario's `theta` values must
@@ -400,11 +418,11 @@ Found while building H1 (adaptive cruise control):
   if you don't sanity-check row counts). Fixed by keying on `global_time`, NGSIM's one genuinely
   monotonic, non-resetting timestamp, and verifying the extracted excerpt's consecutive timestamps
   are all exactly 100ms apart before committing it.
-- `IDMController`'s raw formula returned -1309 m/s² for a plausible close-range, fast-closing
+- `IDMController`'s raw formula returned -1309 m/sÂ² for a plausible close-range, fast-closing
   scenario in a standalone sanity check, run *before* the controller was wired into any node.
   The model's `(s*/gap)^2` interaction term is mathematically unbounded as gap shrinks; nothing in
   the textbook formula itself imposes a physical floor. Fixed by clipping to `a_min` (default -9
-  m/s², ~1g). Catching this via an isolated unit test rather than a failing integration test is
+  m/sÂ², ~1g). Catching this via an isolated unit test rather than a failing integration test is
   the point of testing controllers standalone before wiring them into a harness — same lesson as
   M1's original Bezier-curve curvature bug, just one component earlier in the pipeline this time.
 - `MpcAccController`'s hard `gap(t) >= min_gap` constraint was violated in the closed-loop

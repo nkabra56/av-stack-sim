@@ -6,12 +6,21 @@ bicycle model (`Vehicle`) isn't needed yet; it comes back in H3 once lateral con
 Clamps the commanded acceleration to physical actuator limits, same principle as
 VehicleNode clamping steering/accel for the parking mode: a controller can command
 anything, this node is what enforces what's actually achievable.
+
+Publishes both the true state (`ego_state`, visible only to RadarNode and the
+harness's own evaluation logic -- same ground-truth boundary as everywhere else) and
+noisy `accel_odometry`/`speedometer` readings (H2) for SpeedEstimatorNode to fuse.
 """
 
 import numpy as np
 
 from auto_park.messaging.bus import Bus
-from auto_park.messaging.messages import EgoLongitudinalStateMsg, LongitudinalCmdMsg
+from auto_park.messaging.messages import (
+    AccelOdometryMsg,
+    EgoLongitudinalStateMsg,
+    LongitudinalCmdMsg,
+    SpeedometerMsg,
+)
 
 
 class EgoLongitudinalNode:
@@ -21,15 +30,21 @@ class EgoLongitudinalNode:
         position: float,
         speed: float,
         dt: float,
+        rng: np.random.Generator,
         a_min: float = -9.0,
         a_max: float = 3.0,
+        accel_odom_std: float = 0.15,
+        speedometer_std: float = 0.2,
     ):
         self.bus = bus
         self.position = position
         self.speed = speed
         self.dt = dt
+        self.rng = rng
         self.a_min = a_min
         self.a_max = a_max
+        self.accel_odom_std = accel_odom_std
+        self.speedometer_std = speedometer_std
         self._last_cmd = LongitudinalCmdMsg(0.0)
         bus.subscribe("longitudinal_cmd", self._on_cmd)
 
@@ -41,3 +56,6 @@ class EgoLongitudinalNode:
         self.speed = max(0.0, self.speed + accel * self.dt)  # can't reverse under ACC
         self.position += self.speed * self.dt
         self.bus.publish("ego_state", EgoLongitudinalStateMsg(self.position, self.speed, accel))
+
+        self.bus.publish("accel_odometry", AccelOdometryMsg(accel + self.rng.normal(0.0, self.accel_odom_std)))
+        self.bus.publish("speedometer", SpeedometerMsg(self.speed + self.rng.normal(0.0, self.speedometer_std)))

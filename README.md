@@ -125,8 +125,8 @@ M3 (MPC), state estimation + the pub/sub node architecture, and real-data EKF va
 are all done. M2 (Hybrid A* + Reeds-Shepp obstacle routing) is next.
 
 **Highway**: H1 (adaptive cruise control: IDM + constrained-MPC, validated against real NGSIM
-data) is done. H2 (extend the EKF with a speed state), H3 (lane centering), and H4 (intersection
-navigation) are next.
+data) and H2 (fused ego speed via the same EKF, extended without touching its already-validated
+3-state parking path) are done. H3 (lane centering) and H4 (intersection navigation) are next.
 
 See the milestone list in [IMPLEMENTATION.md](IMPLEMENTATION.md#3-milestones) and DESIGN.md's
 [highway-mode roadmap](DESIGN.md#12-highway-mode-roadmap-h2-h4) for full progress, and the
