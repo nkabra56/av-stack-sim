@@ -1,0 +1,9 @@
+# A car sits in the drive aisle directly between the start pose and the stall. The M1
+# baseline planner (fixed Bezier curve) doesn't route around it -- it can only brake,
+# so this scenario is expected to stall safely rather than reach the spot. See
+# IMPLEMENTATION.md section 6: resolved once Hybrid A* (M2) lands.
+name: "Perpendicular: obstructed lane (expected to stall, not collide)"
+spot: {x: 0.0, y: 0.0, theta: 1.5707963267948966, size: 2.75}
+start: {x: -10.0, y: 0.0, theta: 0.0, wheelbase: 2.7}
+obstacles:
+  - {x: -5.0, y: 0.0, radius: 1.3}   # parked/stopped car dead ahead in the aisle

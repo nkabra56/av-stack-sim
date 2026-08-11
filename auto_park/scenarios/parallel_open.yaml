@@ -1,0 +1,5 @@
+# Parallel stall (~2.6m x 6.7m, sized for a ~4.8m car plus maneuvering room), clear curb.
+name: "Parallel: open curb"
+spot: {x: 0.0, y: 0.0, theta: -1.5707963267948966, size: 2.6}   # theta = -pi/2, facing along the curb
+start: {x: 0.0, y: 10.0, theta: -1.5707963267948966, wheelbase: 2.7}
+obstacles: []

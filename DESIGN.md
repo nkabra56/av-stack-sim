@@ -24,13 +24,13 @@ showcase rather than becoming a shallow attempt at everything.
 ```mermaid
 flowchart LR
     Env[Environment<br/>spot + obstacles] --> Sim[Simulation loop]
-    Sensor[Ultrasonic Sensor] --> Sim
-    Planner[Planner<br/>Reeds-Shepp / Hybrid A*] --> Sim
+    Sensor[Ultrasonic Array] --> Sim
+    Planner[Planner<br/>Dubins now / Hybrid A* + Reeds-Shepp next] --> Sim
     Controller[Controller<br/>Pure Pursuit / MPC] --> Sim
     Sim --> Vehicle[Vehicle<br/>kinematic bicycle model]
     Vehicle --> Sensor
     Vehicle --> Viz[Visualization<br/>matplotlib animation]
-    Sim -.re-plan on new obstacle.-> Planner
+    Sim -.brakes on detection today,<br/>re-plans in M2.-> Planner
 ```
 
 The simulation loop is the only component that knows about all the others; every other module
@@ -60,9 +60,15 @@ theta' = (v / L) * tan(delta)
 ```
 
 where `L` is the wheelbase, `v` is speed (signed — negative means reverse), and `delta` is the
-steering angle. All angles are in **radians** throughout the codebase (the current prototype's
-bug — passing `theta=90.0` meaning degrees into a radians-only model — is exactly the kind of
+steering angle. All angles are in **radians** throughout the codebase (the original prototype's
+bug — passing `theta=90.0` meaning degrees into a radians-only model — was exactly the kind of
 unit mismatch this model is sensitive to, since `theta'` compounds every step).
+
+`Vehicle` also carries `max_steer` (default 0.6 rad, ~34 degrees — a realistic passenger-car
+limit) and exposes `turning_radius = wheelbase / tan(max_steer)`. This is the single source of
+truth the planner and both controllers size themselves against — see Section 5 for why treating
+it as a real physical constraint, rather than an afterthought, turned out to matter a lot more
+than expected.
 
 A full dynamic model (accounting for tire slip, mass, inertia) is deliberately not used: it adds
 significant complexity for a regime (parking-lot speeds, <2 m/s) where it wouldn't change the
@@ -83,23 +89,43 @@ noted here as a future extension (Section 9), not required for the core project.
 
 ## 5. Path planning
 
-The current prototype always generates the same fixed quadratic Bezier curve into the spot,
-regardless of obstacles — obstacles are only handled reactively, by braking the vehicle if
-something is close in front. That means the vehicle can drive itself into a dead end: if an
-obstacle sits on the fixed curve, the car just stops, it never routes around it.
+### What's built now: Dubins paths
 
-Two planners, used together:
+The M1 baseline plans a single fixed **Dubins path** — the shortest path between two poses for a
+forward-only car with a minimum turning radius — from the start pose straight to the spot. It
+does not see obstacles at all; obstacle handling is purely reactive at the control layer (the
+simulation loop brakes when the sensor array detects something close, see Section 2). That means
+the vehicle can drive itself into a dead end: if an obstacle sits on the path, the car brakes and
+stops, it never routes around it. Three of the five demo scenarios are built specifically to show
+this limitation safely (the vehicle stalls, it doesn't collide) rather than pretend it doesn't
+exist — see IMPLEMENTATION.md section 6.
 
-- **Reeds-Shepp curves**: the classical closed-form solution for the shortest path between two
-  poses for a car that can move forward and backward, respecting a minimum turning radius. This
-  is the textbook algorithm for exactly this problem (car parking with reverse gear), and is
-  used here both as a standalone planner for the obstacle-free case and as the local
-  connection/heuristic inside Hybrid A*.
+An earlier version of this planner used a generic smooth (cubic Bezier) curve shaped only by the
+start/goal positions and headings, with no reference to the vehicle's actual turning radius. It
+looked reasonable and passed a casual glance, but for a heading change near 90 degrees (typical
+perpendicular-parking geometry) compressed into a short chord, it produced curvature several
+times tighter than the vehicle's `max_steer` allows — a smooth-looking path that was
+kinematically impossible to drive. Both controllers failed to track it, for the correct reason:
+there was nothing to successfully track. Dubins paths are built from exactly two arcs of the
+vehicle's real turning radius plus a straight segment, so curvature is always either 0 or exactly
+`1 / turning_radius`, never more — every generated path is drivable by construction, not by luck.
+This is the kind of bug that's easy to miss by eyeballing a plotted curve and only shows up once
+you check curvature against the vehicle's actual limits, which is why Section 7 calls this out
+as a design decision rather than leaving it implicit.
+
+### What's next: Hybrid A* + Reeds-Shepp (M2)
+
+Two planners, to be used together, are the principled fix for the obstacle-avoidance gap above:
+
+- **Reeds-Shepp curves**: the closed-form generalization of Dubins paths that also allows
+  reverse gear — the textbook algorithm for car parking specifically. Used both as a standalone
+  planner for the obstacle-free case (in place of Dubins) and as the local connection/heuristic
+  inside Hybrid A*.
 - **Hybrid A\***: search over a discretized `(x, y, theta)` state space, where each expansion
   step is a short arc consistent with the vehicle's turning-radius limits, and the heuristic
-  combines Euclidean distance-to-goal with the cost of the unobstructed Reeds-Shepp path. This
-  is what lets the planner route *around* obstacles instead of only reacting to them at close
-  range: the fixed-curve approach has no way to represent "go around," Hybrid A* does.
+  combines Euclidean distance-to-goal with the cost of the unobstructed Reeds-Shepp path. This is
+  what lets the planner route *around* obstacles instead of only reacting to them at close range:
+  a single fixed Dubins/Reeds-Shepp path has no way to represent "go around," Hybrid A* does.
 
 Alternatives considered:
 
@@ -108,26 +134,35 @@ Alternatives considered:
   mostly-open lot), where a grid search is tractable and gives smoother, more predictable output.
   Hybrid A* is the better fit for a *structured* environment; RRT* earns its keep in cluttered,
   high-dimensional spaces this project doesn't have.
-- **Keep the fixed Bezier curve, just add obstacle checks** — rejected because it can't express
-  "go around an obstacle in the way," only "stop in front of it."
+- **Keep the fixed Dubins path, just add obstacle checks** — rejected for the same reason the
+  Bezier curve was: it can't express "go around an obstacle in the way," only "stop in front of
+  it."
 
 ## 6. Control
 
 Two controllers, presented as a deliberate comparison rather than a single "best" choice:
 
-| | Pure Pursuit (adaptive) | Linear MPC |
+| | Pure Pursuit (adaptive) | MPC |
 |---|---|---|
-| Approach | Geometric — chase a lookahead point on the path | Optimization — minimize predicted tracking error over a horizon |
-| Reverse handling | Direction flips when the lookahead point is behind the vehicle | Explicit in the model; can be penalized/optimized directly |
-| Computational cost | O(path length) per step, trivial | Solves a small QP per step |
-| Tuning surface | Lookahead distance, max speed/accel | Horizon length, state/input cost weights |
-| Weakness | Reactive only — doesn't account for future path curvature | More expensive; performance depends on linearization validity at each step |
+| Approach | Geometric — chase a lookahead point on the path | Optimization — minimize predicted tracking error over a short horizon |
+| Solve method | Closed-form (arctan2), O(path length) per step | Direct-shooting nonlinear program, `scipy.optimize.minimize(SLSQP)`, warm-started each step |
+| Reverse handling | Direction flips when the lookahead point is behind the vehicle | Explicit in the model; `v` is simply a bounded optimization variable |
+| Tuning surface | Lookahead distance, max speed/accel | Horizon length, tracking/effort/smoothness cost weights |
+| Weakness | Reactive only — no margin when the path curvature is already at the vehicle's limit | ~2-3 ms per control step (SLSQP solve); more tuning parameters |
 
-Pure Pursuit remains the default/baseline (it's simple, fast, and already validated in the
-prototype). MPC is added as a second controller selectable per scenario, to demonstrate the
-predictive/optimization-based alternative and make the tradeoffs concrete rather than
-theoretical — the same scenario can be run with either controller and the resulting paths
-compared directly.
+This comparison isn't just theoretical — running both controllers on the same Dubins paths
+surfaced a real, measurable difference. A Dubins path sits *exactly* at the vehicle's curvature
+limit by construction (Section 5), which leaves Pure Pursuit's reactive steering law zero margin:
+any small lookahead-target misalignment demands more curvature than the vehicle can provide,
+steering saturates, and on the tighter perpendicular-parking scenario Pure Pursuit overshoots
+into a near-360-degree loop before recovering. MPC, by rolling out the actual dynamics over a
+horizon and respecting the same steering bound as a hard constraint rather than reacting to it
+after the fact, converges directly with no overshoot. Both controllers succeed reliably on the
+scenarios with a clear path to the spot; the gap shows up specifically where the path is
+curvature-saturated, which is exactly the regime the comparison table above predicts.
+
+Pure Pursuit remains the default/baseline (it's simple, fast, and easy to reason about). MPC is
+selectable per scenario via `demo.py --controller mpc`.
 
 ## 7. Design decisions & alternatives considered
 
@@ -139,6 +174,11 @@ compared directly.
 - **Obstacles as circles, not polygons**: keeps the sensor/planner collision math analytic
   (closed-form ray/circle and pose/circle checks) instead of requiring a general polygon
   collision library; sufficient for representing parked cars/pillars as bounding circles.
+- **Brake-trigger distance sized from stopping physics, not picked by feel**: `brake_distance`
+  must exceed the vehicle's actual stopping distance (`v_max^2 / (2*a_max)`, ~1.4 m at this
+  project's speeds/accel limits) plus margin, or the vehicle detects an obstacle in time but
+  still can't decelerate fast enough to avoid it. An earlier, arbitrarily-chosen smaller value
+  produced exactly that: real collisions in scenarios the vehicle should have safely stalled in.
 
 ## 8. Known limitations & assumptions
 

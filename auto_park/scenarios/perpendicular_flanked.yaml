@@ -1,0 +1,11 @@
+# Target stall has a car already parked in each neighboring stall (spot pitch ~2.75m),
+# and the vehicle enters at a slight angle rather than dead-straight down the aisle.
+# The shortest kinematically-feasible Dubins path clips close to the left neighbor;
+# the M1 baseline doesn't route around it, so this is expected to stall safely rather
+# than reach the spot. See IMPLEMENTATION.md section 6: resolved once Hybrid A* (M2) lands.
+name: "Perpendicular: flanked by parked cars (expected to stall, not collide)"
+spot: {x: 0.0, y: 0.0, theta: 1.5707963267948966, size: 2.75}
+start: {x: -10.0, y: 1.0, theta: 0.15, wheelbase: 2.7}
+obstacles:
+  - {x: -2.75, y: 2.5, radius: 1.3}   # parked car, left neighbor stall
+  - {x: 2.75, y: 2.5, radius: 1.3}    # parked car, right neighbor stall

@@ -1,0 +1,11 @@
+# Classic tight parallel-parking case: a car parked ahead of and behind the target
+# stall, vehicle pulls up alongside (laterally offset) before curving in. The direct
+# Dubins path passes close to the car ahead; the M1 baseline doesn't route around it,
+# so this is expected to stall safely rather than reach the spot. See
+# IMPLEMENTATION.md section 6: resolved once Hybrid A* (M2) lands.
+name: "Parallel: between two parked cars (expected to stall, not collide)"
+spot: {x: 0.0, y: 0.0, theta: -1.5707963267948966, size: 2.6}
+start: {x: 1.8, y: 10.0, theta: -1.5707963267948966, wheelbase: 2.7}
+obstacles:
+  - {x: 0.0, y: 5.5, radius: 1.3}    # parked car ahead of the stall
+  - {x: 0.0, y: -5.5, radius: 1.3}   # parked car behind the stall

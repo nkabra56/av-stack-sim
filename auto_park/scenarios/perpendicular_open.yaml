@@ -1,0 +1,5 @@
+# Perpendicular spot (SAE-ish standard stall: ~2.75m wide x 5.5m deep), clear lane approach.
+name: "Perpendicular: open lane"
+spot: {x: 0.0, y: 0.0, theta: 1.5707963267948966, size: 2.75}   # theta = pi/2, facing into the stall
+start: {x: -10.0, y: 0.0, theta: 0.0, wheelbase: 2.7}            # facing east down the drive aisle
+obstacles: []
