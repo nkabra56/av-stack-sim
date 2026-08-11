@@ -2,13 +2,14 @@
 
 This is the build spec for the architecture described in [DESIGN.md](DESIGN.md). Parking-mode
 milestones M1 (correct baseline), the control half of M3 (MPC), ME (state estimation + pub/sub
-architecture), and MV (real-data EKF validation against KITTI) are done. Highway-mode milestones
-**H1 (adaptive cruise control)**, **H2 (fused ego speed via an extended EKF)**, and **H3 (lane
-centering)** are also done — the sections below reflect what's actually in the repo today, not
-just what was planned. Two things are next: parking's M2 (Hybrid A* + Reeds-Shepp obstacle
-routing) and highway's H4 (intersection navigation) — see Section 3 for the full roadmap on both
-sides, and DESIGN.md section 12's H3 entry for what's explicitly *not* done yet (combining H1/H2's
-ACC with H3's lane centering into one closed loop).
+architecture), and MV (real-data EKF validation against KITTI) are done. All four highway-mode
+milestones — **H1 (adaptive cruise control)**, **H2 (fused ego speed via an extended EKF)**, **H3
+(lane centering)**, and **H4 (intersection navigation)** — are also done, each validated or tested
+standalone. The one thing left on the highway side isn't a new milestone: it's combining H1/H2's
+ACC with H3's lane centering (and H4's intersection logic) into one closed loop over a single
+`Vehicle`, deliberately deferred at each step rather than attempted all at once — see DESIGN.md
+section 12's "Full closed-loop highway drive" entry. Parking's M2 (Hybrid A* + Reeds-Shepp
+obstacle routing) is the other thing next — see Section 3 for the full roadmap.
 
 ## 1. Directory structure
 
@@ -66,9 +67,11 @@ auto_park/
     acc_controller_node.py   # wraps an ACC controller; acts on the fused speed estimate
                        # (not true speed), one accel command per tick
   harness.py            # tick-based executor (parking mode): owns the Bus, builds all 5 nodes
-  highway_harness.py       # tick-based executor (ACC/H1 mode): owns the Bus, builds the 4
+  highway_harness.py       # tick-based executor (ACC/H1+H2 mode): owns the Bus, builds the
                        # longitudinal nodes -- mirrors harness.py's structure, kept separate
                        # rather than forcing a shared base class before H3 shows what's common
+  intersection_harness.py    # direct simulation loop (no Bus -- H4 has no sensor noise/fusion
+                       # to decouple) for IntersectionNavigator scenarios, see section 12's H4 entry
   planning/
     __init__.py
     dubins.py            # M1 baseline: curvature-feasible fixed path, no obstacle avoidance

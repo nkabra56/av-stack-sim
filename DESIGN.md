@@ -484,11 +484,27 @@ not a strict target, since the real driver isn't assumed optimal).
   `Vehicle` takes both an ACC-computed speed and a Stanley-computed steering angle each tick.
   That integration is real follow-up work, not attempted in this pass, the same way H1 shipped
   ACC standalone before H2 extended it rather than building everything simultaneously.
-- **H4 — Intersection navigation.** Rule-based right-of-way state machine for a
-  stop-sign-controlled intersection, built on H1 + H3 rather than new control theory — mostly
-  reasoning wired on top of existing control. Validated against hand-authored scenarios (same
-  pattern as parking's obstacle scenarios) since real intersection datasets (INTERACTION, inD) are
-  registration-gated, like highD (noted below) — an optional upgrade, not a blocker.
+- **H4 — Intersection navigation: done.** `control/intersection.py`'s `IntersectionNavigator`: a
+  3-state machine (`APPROACHING` → `STOPPED` → `PROCEEDING`) for a stop-sign-controlled
+  intersection, built on H1 rather than new control theory — genuinely just reasoning wired on
+  top of existing control. The stop line is modeled as a *stationary virtual lead vehicle*
+  (`lead_speed=0`) at a fixed position, so "decelerate smoothly and stop behind it" directly
+  reuses `IDMController` — exactly the standstill car-following behavior H1/H2 already validated
+  against real congested-traffic data, not new math. Right-of-way: first vehicle to *fully stop*
+  gets priority; simultaneous stops yield to the right — the standard real-world 4-way-stop rule,
+  not invented for this project.
+
+  **Scope**: models the intersection as a single conflict point two independent approaches share,
+  not full 2D multi-direction intersection geometry — this captures the actual substance of
+  right-of-way reasoning (mutual exclusion + arrival-order priority) without needing to simulate
+  a full 4-way intersection's road layout, the same kind of tight scoping H1 (longitudinal-only)
+  and H3 (not yet combined with H1) already used. Validated against hand-authored scenarios (same
+  pattern as parking's obstacle scenarios, not derived from a real dataset — the point is
+  exercising specific right-of-way branches: no conflict, ego-arrived-first, other-arrived-first,
+  simultaneous-arrival-yield-right, simultaneous-arrival-no-yield-left) since real intersection
+  datasets (INTERACTION, inD) are registration-gated, like highD (below) — an optional upgrade,
+  not a blocker. Every scenario also asserts the ego vehicle never crosses the stop line without
+  having fully stopped first — compliance, not just liveness.
 - **Robust/stochastic MPC for ACC**, closing the gap noted in Section 11: tighten the gap
   constraint by a margin proportional to prediction uncertainty instead of a fixed empirically-
   chosen `min_gap`, so the safety margin adapts to how much the lead vehicle's behavior is
@@ -497,3 +513,12 @@ not a strict target, since the real driver isn't assumed optimal).
   provides, free for non-commercial use but registration-gated (a manual data-request form, no
   anonymous download) — worth it once lane geometry precision actually matters, not required to
   build H3 in the first place.
+- **Full closed-loop highway drive**: combine H1 (ACC, longitudinal), H2 (fused speed), and H3
+  (Stanley, lateral) into one loop over a single `Vehicle`, then route it through H4's
+  intersection logic — each piece is validated standalone today; wiring them together is the
+  natural next integration milestone once there's a concrete reason to (e.g. a scenario that
+  needs more than one capability at once, the same trigger that would motivate generalizing
+  `harness.py`/`highway_harness.py` into a shared base, per Section 2).
+- **Full 2D intersection geometry**: H4's single-conflict-point model captures priority reasoning
+  but not actual crossing paths, turning movements, or more than two approaches at once — a real
+  4-way intersection simulation with lane-level geometry per approach.
