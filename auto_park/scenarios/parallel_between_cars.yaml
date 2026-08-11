@@ -1,9 +1,14 @@
 # Classic tight parallel-parking case: a car parked ahead of and behind the target
 # stall, vehicle pulls up alongside (laterally offset) before curving in. The direct
 # Dubins path passes close to the car ahead; the M1 baseline doesn't route around it,
-# so this is expected to stall safely rather than reach the spot. See
-# IMPLEMENTATION.md section 6: resolved once Hybrid A* (M2) lands.
-name: "Parallel: between two parked cars (expected to stall, not collide)"
+# so it used to stall safely rather than reach the spot. Resolved by Hybrid A* (M2)
+# for MPC (5/5 seeds, needs a genuine reverse-gear cusp maneuver -- up to ~880 of
+# 1000 steps to converge). Pure Pursuit is NOT safe on this scenario: its known
+# "no margin at curvature limits" weakness (DESIGN.md section 7) causes real
+# collisions here (5/5 seeds, consistently) -- a documented exception, see
+# tests/test_simulation.py's UNSAFE_COMBINATIONS and IMPLEMENTATION.md section 3's
+# M2 entry.
+name: "Parallel: between two parked cars"
 spot: {x: 0.0, y: 0.0, theta: -1.5707963267948966, size: 2.6}
 start: {x: 1.8, y: 10.0, theta: -1.5707963267948966, wheelbase: 2.7}
 obstacles:

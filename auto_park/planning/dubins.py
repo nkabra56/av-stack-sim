@@ -95,38 +95,69 @@ def _straight_points(pose: Pose, distance: float, n: int) -> np.ndarray:
     return np.column_stack([x + s * np.cos(theta), y + s * np.sin(theta), np.full(n, theta)])
 
 
+def _solve_csc(
+    start: Pose, goal: Pose, turning_radius: float
+) -> tuple[float, str, str, float, float, float] | None:
+    """Shortest feasible CSC (Dubins) candidate from start to goal: (length, first,
+    last, t, p, q), where t/q are the two arcs' swept angles (radians) and p is the
+    straight segment's length in turning_radius units. None if all 4 CSC families are
+    infeasible -- only happens when the start/goal turning circles are closer than
+    ~4x turning_radius, the CCC-only regime (see reeds_shepp.py, which reuses this).
+    """
+    ex, ey = goal[0] - start[0], goal[1] - start[1]
+    dist = np.hypot(ex, ey)
+    chord_theta = np.arctan2(ey, ex) if dist > 1e-9 else start[2]
+    d = dist / turning_radius
+    alpha = _mod2pi(start[2] - chord_theta)
+    beta = _mod2pi(goal[2] - chord_theta)
+
+    candidates = []
+    for name, (fn, first, last) in _FAMILIES.items():
+        result = fn(alpha, beta, d)
+        if result is None:
+            continue
+        t, p, q = result
+        candidates.append((turning_radius * (t + p + q), first, last, t, p, q))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda c: c[0])
+
+
+def _csc_points(
+    start: Pose, first: str, last: str, t: float, p: float, q: float, turning_radius: float, step: float = 0.1
+) -> np.ndarray:
+    """Walk the (first, S, last) segment list from start, sampling at fixed
+    arc-length `step` (meters) -- a fixed step keeps per-call cost proportional to
+    actual path length, needed by reeds_shepp.py/hybrid_astar.py which call this many
+    times per search at widely varying lengths."""
+    seg_defs = [(first, t, True), ("S", turning_radius * p, False), (last, q, True)]
+    seg_lengths = np.array([turning_radius * mag if is_angle else mag for _, mag, is_angle in seg_defs])
+    total = seg_lengths.sum()
+    counts = np.maximum(2, np.round(seg_lengths / step).astype(int)) if total > 1e-9 else [2, 2, 2]
+
+    pose = start
+    segments = []
+    for (kind, mag, _is_angle), n in zip(seg_defs, counts):
+        pts = _straight_points(pose, mag, n) if kind == "S" else _arc_points(pose, turning_radius, mag, kind == "L", n)
+        segments.append(pts)
+        pose = tuple(pts[-1])
+
+    path = np.vstack(segments)
+    path[:, 2] = wrap_angle(path[:, 2])
+    return path
+
+
 class DubinsPlanner:
     def plan(
         self, start: Pose, goal: Pose, obstacles: list[Obstacle], turning_radius: float, npts: int = 150
     ) -> np.ndarray:
-        ex, ey = goal[0] - start[0], goal[1] - start[1]
-        dist = np.hypot(ex, ey)
-        chord_theta = np.arctan2(ey, ex) if dist > 1e-9 else start[2]
-        d = dist / turning_radius
-        alpha = _mod2pi(start[2] - chord_theta)
-        beta = _mod2pi(goal[2] - chord_theta)
-
-        candidates = []
-        for name, (fn, first, last) in _FAMILIES.items():
-            result = fn(alpha, beta, d)
-            if result is None:
-                continue
-            t, p, q = result
-            candidates.append((turning_radius * (t + p + q), first, last, t, p, q))
-        _length, first, last, t, p, q = min(candidates, key=lambda c: c[0])
-
-        seg_defs = [(first, t, True), ("S", turning_radius * p, False), (last, q, True)]
-        seg_lengths = np.array([turning_radius * mag if is_angle else mag for _, mag, is_angle in seg_defs])
-        total = seg_lengths.sum()
-        counts = np.maximum(2, np.round(npts * seg_lengths / total).astype(int)) if total > 1e-9 else [2, 2, 2]
-
-        pose = start
-        segments = []
-        for (kind, mag, _is_angle), n in zip(seg_defs, counts):
-            pts = _straight_points(pose, mag, n) if kind == "S" else _arc_points(pose, turning_radius, mag, kind == "L", n)
-            segments.append(pts)
-            pose = tuple(pts[-1])
-
-        path = np.vstack(segments)
-        path[:, 2] = wrap_angle(path[:, 2])
-        return path
+        result = _solve_csc(start, goal, turning_radius)
+        if result is None:
+            raise RuntimeError(
+                f"No CSC Dubins candidate feasible for start={start}, goal={goal}, "
+                f"turning_radius={turning_radius} (start/goal turning circles are too "
+                f"close together -- the CCC-only regime this planner doesn't cover)."
+            )
+        length, first, last, t, p, q = result
+        step = max(length / npts, 1e-6)
+        return _csc_points(start, first, last, t, p, q, turning_radius, step=step)

@@ -211,16 +211,16 @@ RMSE number, since the exact figure is a property of this one excerpt, not a gua
 
 ## 6. Path planning
 
-### What's built now: Dubins paths
+### M1 baseline: Dubins paths
 
 The M1 baseline plans a single fixed **Dubins path** — the shortest path between two poses for a
 forward-only car with a minimum turning radius — from the start pose straight to the spot. It
 does not see obstacles at all; obstacle handling is purely reactive at the control layer (the
 simulation loop brakes when the sensor array detects something close, see Section 2). That means
 the vehicle can drive itself into a dead end: if an obstacle sits on the path, the car brakes and
-stops, it never routes around it. Three of the five demo scenarios are built specifically to show
-this limitation safely (the vehicle stalls, it doesn't collide) rather than pretend it doesn't
-exist — see IMPLEMENTATION.md section 6.
+stops, it never routes around it. Three of the five demo scenarios were originally built
+specifically to show this limitation safely (the vehicle stalls, it doesn't collide) rather than
+pretend it doesn't exist; M2 (below) is what actually solves them.
 
 An earlier version of this planner used a generic smooth (cubic Bezier) curve shaped only by the
 start/goal positions and headings, with no reference to the vehicle's actual turning radius. It
@@ -233,21 +233,85 @@ vehicle's real turning radius plus a straight segment, so curvature is always ei
 `1 / turning_radius`, never more — every generated path is drivable by construction, not by luck.
 This is the kind of bug that's easy to miss by eyeballing a plotted curve and only shows up once
 you check curvature against the vehicle's actual limits, which is why Section 8 calls this out
-as a design decision rather than leaving it implicit.
+as a design decision rather than leaving it implicit. `DubinsPlanner` stays in the repo,
+unmodified in behavior, both as a documented "M1 baseline" reference (`demo.py --planner dubins`)
+and because `reeds_shepp.py` reuses its CSC formulas directly (Section below).
 
-### What's next: Hybrid A* + Reeds-Shepp (M2)
+### M2 — Hybrid A* + Reeds-Shepp: done
 
-Two planners, to be used together, are the principled fix for the obstacle-avoidance gap above:
+Two planners, used together, are the fix for the obstacle-avoidance gap above, and are now the
+default (`HybridAStarPlanner`, selectable via `demo.py --planner`, alongside `reeds_shepp`/`dubins`
+for comparison):
 
-- **Reeds-Shepp curves**: the closed-form generalization of Dubins paths that also allows
-  reverse gear — the textbook algorithm for car parking specifically. Used both as a standalone
-  planner for the obstacle-free case (in place of Dubins) and as the local connection/heuristic
-  inside Hybrid A*.
-- **Hybrid A\***: search over a discretized `(x, y, theta)` state space, where each expansion
-  step is a short arc consistent with the vehicle's turning-radius limits, and the heuristic
-  combines Euclidean distance-to-goal with the cost of the unobstructed Reeds-Shepp path. This is
-  what lets the planner route *around* obstacles instead of only reacting to them at close range:
-  a single fixed Dubins/Reeds-Shepp path has no way to represent "go around," Hybrid A* does.
+- **Reeds-Shepp curves** (`planning/reeds_shepp.py`): the closed-form generalization of Dubins
+  paths that also allows reverse gear. **Scoped to the CSC family only** — the same 4
+  circle-straight-circle families `dubins.py` already implements (LSL, RSR, LSR, RSL), each tried
+  in both a forward and a backward-gear direction (8 candidates total) — deliberately not
+  implementing the CCC ("3-point-turn") family, the same kind of scoping decision `dubins.py`
+  already makes for its own CCC exclusion (only matters when start/goal turning circles are closer
+  than ~4x turning_radius; checked against all 5 scenarios' actual geometry, none needs it, and
+  Hybrid A*'s primitive-by-primitive search can compose the same shape out of ordinary
+  forward+reverse steps even where the closed-form shortcut isn't available — a missing CCC family
+  degrades search quality in a rare pocket, it never makes a scenario unsolvable).
+
+  The reverse-gear half reuses `dubins.py`'s forward-only CSC solver unchanged, via a simplification
+  found while implementing it: **a backward-gear CSC path from A to B is exactly the point array of
+  the ordinary forward CSC solve from B to A, with row order reversed and headings left
+  untouched** — no reflect/timeflip trigonometry needed. Verified by hand (two independent
+  derivations of a reverse-gear arc landed on identical points) before trusting it, the same
+  "verify before you build on it" discipline as the KITTI axis-convention check (Section 5) and the
+  Stanley sign-convention bug (Section 12's H3 entry).
+- **Hybrid A\*** (`planning/hybrid_astar.py`): search over a discretized `(x, y, theta)` state
+  space (0.5m / 5° resolution), where each expansion step is one of 6 motion primitives (3
+  steering choices × forward/reverse, each exactly 0 or `1/turning_radius` curvature — the same
+  two values Dubins already restricts to), costed per Dolgov et al. 2010's practical formulation
+  (reverse/cusp/steering-change penalties bias the search toward smooth, mostly-forward paths while
+  still permitting reverse where it's the only way through). The heuristic is the (obstacle-unaware)
+  Reeds-Shepp path length to the goal, also used for **analytic expansion** — attempting a direct,
+  collision-checked Reeds-Shepp connection from the current node to the goal, which is what keeps
+  obstacle-free scenarios fast (the very first attempt, on the root node, already succeeds when
+  there's nothing in the way, so the search degenerates to one `reeds_shepp_path()` call — the same
+  O(1) cost as `DubinsPlanner`). Fails loud (`PlanningFailure`) if the search budget
+  (`max_expansions=20,000`) is exhausted rather than returning a partial path — measured actual
+  usage across all 5 scenarios tops out at 75 expansions (`perpendicular_flanked`), a ~260x margin,
+  so the default has real headroom rather than being sized to merely look sufficient.
+
+  `VEHICLE_RADIUS` moved from `harness.py` to `environment.py` as a shared constant: Hybrid A*'s own
+  obstacle-avoidance predicate needs the exact same collision threshold `harness._collided()`
+  checks at runtime, and duplicating it risked the same class of silent-drift bug already found once
+  in pre-merge review (`VEHICLE_RADIUS=0.3` under-reporting collisions).
+
+**A real finding from building it**: making the planner obstacle-aware surfaced a latent
+architecture assumption. `ControllerNode`'s reactive sensor-braking (brakes whenever *any* obstacle
+reading is closer than `brake_distance`) was written for M1's Dubins planner, which never
+deliberately gets close to an obstacle — so "sensor sees something within 3m" always meant "unplanned
+hazard, stop." Once Hybrid A* started producing paths that *intentionally* pass within a vehicle's
+length of a parked car as part of a valid avoidance maneuver, that same braking logic triggered on
+every such approach and permanently stalled the vehicle before it ever reached the maneuver — measured
+directly (`perpendicular_flanked`: 0/5 success, 0/5 collision, i.e. braking safely forever). Fixed by
+`hybrid_astar.brake_distance_for(planner)`, which derives a smaller `brake_distance` from the
+planner's own guaranteed worst-case clearance (`vehicle_radius + safety_margin`, minus a buffer) —
+below that floor, no genuine avoidance maneuver can ever falsely trigger it, while it still catches
+truly unplanned proximity. `DubinsPlanner`/`ReedsSheppPlanner` (obstacle-blind) keep `ParkingHarness`'s
+original `brake_distance=3.0` default, which still needs the full physical-stopping-distance margin
+since braking is the *only* thing preventing a collision for those planners.
+
+**A second real finding, from validating rather than just building**: fixing the brake-distance issue
+made `perpendicular_flanked` and `perpendicular_obstructed_lane` succeed reliably (5/5 seeds, both
+controllers), but `parallel_between_cars` — the tightest scenario, needing a genuine reverse-gear cusp
+between two close parked cars — exposed a real controller limitation rather than a planner bug. Pure
+Pursuit's already-documented "no margin when curvature is already at the limit" weakness (Section 7)
+turned out to be a measured, *consistent* safety failure here, not noise-dependent flakiness: 5/5
+seeds collide, regardless of `brake_distance` or the planner's own `safety_margin` (widening the
+margin just traded the collision for Pure Pursuit never converging at all — confirmed it isn't a
+tuning problem). MPC's constraint-respecting rollout stays collision-free and converges reliably
+(5/5 seeds, up to ~880 of a raised 1000-step budget — Hybrid A*'s avoidance routes are longer and
+more circuitous than M1's direct paths ever needed to be). Rather than force both controllers to
+"succeed" via some numeric hack, this is documented as a real, scoped exception
+(`tests/test_simulation.py`'s `UNSAFE_COMBINATIONS`, pinned by its own regression test) — the same
+honest treatment DESIGN.md already gives the Pure-Pursuit-vs-MPC tradeoff in the abstract, now
+concretely realized once a planner actually produces curvature-saturated, obstacle-hugging paths for
+Pure Pursuit to track.
 
 Alternatives considered:
 
@@ -259,6 +323,9 @@ Alternatives considered:
 - **Keep the fixed Dubins path, just add obstacle checks** — rejected for the same reason the
   Bezier curve was: it can't express "go around an obstacle in the way," only "stop in front of
   it."
+- **Full 12-formula Reeds-Shepp (CCC included)** — rejected for M2; see the CSC-scoping rationale
+  above. Genuine future work if a scenario is ever added where start/goal turning circles are
+  closer than 4x turning_radius and Hybrid A*'s primitive-composed fallback isn't good enough.
 
 ## 7. Control
 
@@ -312,7 +379,9 @@ selectable per scenario via `demo.py --controller mpc`.
 - **Obstacles as circles, not polygons**: keeps the sensor/planner collision math analytic
   (closed-form ray/circle and pose/circle checks) instead of requiring a general polygon
   collision library; sufficient for representing parked cars/pillars as bounding circles. The
-  ego vehicle's own collision footprint (`VEHICLE_RADIUS` in `harness.py`) is modeled the same
+  ego vehicle's own collision footprint (`VEHICLE_RADIUS` in `environment.py`, shared by
+  `harness.py` and `planning/hybrid_astar.py` so both collision checks use the exact same
+  threshold) is modeled the same
   way and has to be on the same scale as the obstacles it shares the lot with (1.0 m, vs. ~1.3 m
   for a parked car) — an earlier, much smaller placeholder value (0.3 m) made the vehicle roughly
   four times "thinner" than the cars around it for collision purposes, which under-reports real

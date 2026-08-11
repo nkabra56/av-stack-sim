@@ -2,14 +2,15 @@
 
 This is the build spec for the architecture described in [DESIGN.md](DESIGN.md). Parking-mode
 milestones M1 (correct baseline), the control half of M3 (MPC), ME (state estimation + pub/sub
-architecture), and MV (real-data EKF validation against KITTI) are done. All four highway-mode
-milestones — **H1 (adaptive cruise control)**, **H2 (fused ego speed via an extended EKF)**, **H3
-(lane centering)**, and **H4 (intersection navigation)** — are also done, each validated or tested
-standalone. The one thing left on the highway side isn't a new milestone: it's combining H1/H2's
-ACC with H3's lane centering (and H4's intersection logic) into one closed loop over a single
-`Vehicle`, deliberately deferred at each step rather than attempted all at once — see DESIGN.md
-section 12's "Full closed-loop highway drive" entry. Parking's M2 (Hybrid A* + Reeds-Shepp
-obstacle routing) is the other thing next — see Section 3 for the full roadmap.
+architecture), MV (real-data EKF validation against KITTI), and **M2 (Hybrid A* + Reeds-Shepp
+obstacle-aware planning)** are done. All four highway-mode milestones — **H1 (adaptive cruise
+control)**, **H2 (fused ego speed via an extended EKF)**, **H3 (lane centering)**, and **H4
+(intersection navigation)** — are also done, each validated or tested standalone. The one thing
+left on the highway side isn't a new milestone: it's combining H1/H2's ACC with H3's lane centering
+(and H4's intersection logic) into one closed loop over a single `Vehicle`, deliberately deferred
+at each step rather than attempted all at once — see DESIGN.md section 12's "Full closed-loop
+highway drive" entry. On the parking side, M4 (sensing & re-planning) and M5/M6 (visualization
+polish, CI) are what's next — see Section 3 for the full roadmap.
 
 ## 1. Directory structure
 
@@ -17,7 +18,8 @@ obstacle routing) is the other thing next — see Section 3 for the full roadmap
 auto_park/
   vehicle.py           # kinematic bicycle model + turning_radius from max_steer
   sensors.py            # ultrasonic ray-cast sensor array (used internally by SensorNode)
-  environment.py         # parking lot, spots, obstacles, boundaries
+  environment.py         # parking lot, spots, obstacles, boundaries, VEHICLE_RADIUS (shared by
+                       # harness.py and planning/hybrid_astar.py, one collision threshold)
   interfaces.py          # Planner / Controller structural protocols, HasPose, Pose type
   scenario_loader.py       # loads scenarios/*.yaml into Vehicle + Environment (+ seed)
   messaging/
@@ -74,9 +76,12 @@ auto_park/
                        # to decouple) for IntersectionNavigator scenarios, see section 12's H4 entry
   planning/
     __init__.py
-    dubins.py            # M1 baseline: curvature-feasible fixed path, no obstacle avoidance
-    reeds_shepp.py        # M2 (not yet built): adds reverse gear
-    hybrid_astar.py        # M2 (not yet built): obstacle-aware search, uses reeds_shepp
+    dubins.py            # M1 baseline: curvature-feasible fixed path, no obstacle avoidance.
+                       # Kept as a documented reference (demo.py --planner dubins); also the
+                       # single source of truth for the CSC formulas reeds_shepp.py reuses
+    reeds_shepp.py        # M2: Dubins + reverse gear (CSC family only, see DESIGN.md section 6)
+    hybrid_astar.py        # M2: obstacle-aware search over (x,y,theta), uses reeds_shepp.py as
+                       # heuristic + analytic-expansion connector; the default planner now
   control/
     __init__.py
     pure_pursuit.py        # adaptive Pure Pursuit, acts on HasPose (a Vehicle or a pose estimate)
@@ -92,12 +97,15 @@ auto_park/
     perpendicular_obstructed_lane.yaml
     parallel_open.yaml
     parallel_between_cars.yaml
-  demo.py              # CLI entry point: run a named scenario + controller (+ seed), show/save
+  demo.py              # CLI entry point: run a named scenario + controller/planner (+ seed),
+                       # show/save; --planner {hybrid_astar (default), reeds_shepp, dubins}
 tests/
   test_vehicle.py
   test_bus.py
   test_ekf.py
   test_kitti_ekf_validation.py  # EKF vs. dead-reckoning-only on the committed real KITTI excerpt
+  test_planning.py        # endpoint + curvature checks (both planners), obstacle-clearance
+                       # check (Hybrid A* only) -- see DESIGN.md section 6's M2 entry
   test_simulation.py       # integration tests, harness-based, across scenarios x controllers x seeds
   test_acc.py            # IDM/MPC-ACC unit + synthetic braking-lead scenario checks
   test_acc_validation.py    # IDM/MPC-ACC vs. real NGSIM data: safety, plausibility, determinism
@@ -112,10 +120,10 @@ README.md
 `simulation.py`/`ParkingSimulation` (the M1 direct-call loop) is retired — `harness.py` is now the
 one way `demo.py` and the tests run a scenario, so there's a single execution path rather than two.
 
-`test_sensors.py`, `test_planning.py`, and `test_control.py` (unit-level, per Section 4) haven't
-been split out yet — current coverage is integration-level via `test_simulation.py`, which is
-enough to catch the regressions that mattered so far, but the finer-grained unit tests are still
-worth adding as `planning/` grows with M2.
+`test_planning.py` now exists (added with M2, once `planning/` had more than one planner to
+compare against). `test_sensors.py` and `test_control.py` (unit-level, per Section 4) still
+haven't been split out — current coverage for those is integration-level via `test_simulation.py`,
+which has been enough to catch the regressions that mattered so far.
 
 ## 2. Key interfaces
 
@@ -241,12 +249,18 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   backwards), and for what's explicitly deferred: combining H1/H2's ACC with H3's Stanley control
   into one closed loop over a single `Vehicle` is real follow-up work, not done in this pass.
   M2 (below) and H4 (DESIGN.md section 12) are next, in either order — they're independent.
-- **M2 — Planning (next up)**: implement `reeds_shepp.py`, then `hybrid_astar.py` on top of it;
-  replace the fixed Dubins path with Hybrid A* as the default planner, planning from the pose
-  *estimate* (already how `PlannerNode` is wired — no further node changes needed). Validate
-  against the scenarios that currently stall safely rather than reach the spot
-  (`perpendicular_flanked`, `perpendicular_obstructed_lane`, `parallel_between_cars`) — Hybrid A*
-  should solve all three.
+- **M2 — Planning: done.** `planning/reeds_shepp.py` (Reeds-Shepp curves, CSC family only) and
+  `planning/hybrid_astar.py` (obstacle-aware search using Reeds-Shepp as heuristic/analytic
+  connector) replace the fixed Dubins path with `HybridAStarPlanner` as the default planner
+  (`demo.py`/`test_simulation.py`), planning from the pose *estimate* as before — no `PlannerNode`
+  changes needed, exactly as anticipated. Validated against the three scenarios that used to stall
+  safely rather than reach the spot: `perpendicular_flanked` and `perpendicular_obstructed_lane`
+  now succeed 5/5 seeds with both controllers; `parallel_between_cars` (the tightest, needing a
+  genuine reverse-gear cusp) succeeds 5/5 with MPC but is a documented, measured *unsafe*
+  combination with Pure Pursuit (5/5 collisions, not flaky — see DESIGN.md section 6's M2 entry and
+  the "Found while building M2" entries below for the two real issues this surfaced: reactive
+  braking defeating intentional close passes, and Pure Pursuit's pre-existing curvature-limit
+  weakness becoming an actual safety failure rather than just an efficiency loss).
 - **M4 — Sensing & re-planning**: sensor is already a multi-beam array (`[-0.6, -0.3, 0.0, 0.3,
   0.6]` rad) and braking already checks all beams, not just the front one. Still open: wiring
   `PlannerNode` to re-plan (not just `ControllerNode` to brake) when `SensorNode` reports an
@@ -255,11 +269,15 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   trajectory, a covariance ellipse, and the planned path (landed as part of ME, since the whole
   point of adding an estimator is visible directly in that comparison). Still open: a genuinely
   multi-panel layout (live sensor readings, speed profile) alongside the top-down view.
-- **M6 — Tests & CI**: 100 tests across both modes run in ~22s; no GitHub Actions workflow yet.
+- **M6 — Tests & CI**: 136 tests across both modes run in ~100s; no GitHub Actions workflow yet.
 
 ## 4. Testing strategy
 
-Current (100 tests, ~22s):
+Current (136 tests, ~100s -- up from ~20s pre-M2, almost entirely because Hybrid A*'s longer,
+more circuitous avoidance routes need more simulation steps to converge (raised from 500 to 1000)
+and more (scenario, controller) combinations are now exercised at that budget; the planning calls
+themselves are cheap, measured at under 1s combined across the whole suite, so memoizing them
+wasn't worth the complexity):
 
 - Kinematic checks: driving straight for N steps moves `x` by `v*N*dt` with `theta` unchanged; a
   fixed steering angle over time traces a circle of radius `L / tan(delta)`; `turning_radius`
@@ -271,12 +289,14 @@ Current (100 tests, ~22s):
   reduces covariance trace; a predict-only step strictly grows it; over 200 predict+update cycles
   with fixed-seed bounded noise, estimation error stays bounded (a filter-consistency check, not
   just "it runs").
-- Integration, parametrized over both controllers, run against `ParkingHarness`: on the two
-  obstacle-free scenarios, assert a **success rate â‰¥4/5 across 5 fixed seeds** (not single-run
-  determinism — Section "Control" tradeoffs in DESIGN.md explains why a rate, not 100%, is the
-  right thing to assert once real noise is in the loop). On *every* scenario × controller × seed
-  (50 combinations), assert not `.collision` — safety has to hold regardless of estimation noise,
-  including on the three scenarios that aren't expected to reach the spot.
+- Integration, run against `ParkingHarness` with `HybridAStarPlanner`: for every (scenario,
+  controller) pair except the one documented exception (`parallel_between_cars` + Pure Pursuit,
+  see M2's entry in Section 3), assert a **success rate ≥4/5 across 5 fixed seeds** (not
+  single-run determinism — Section "Control" tradeoffs in DESIGN.md explains why a rate, not 100%,
+  is the right thing to assert once real noise is in the loop) *and* assert not `.collision` on
+  every seed — safety has to hold regardless of estimation noise. The one excluded combination gets
+  its own pinned regression test asserting it *does* collide, so the exclusion can't silently go
+  stale if a future change actually fixes it.
 - Regression guard for the original degrees/radians bug: every scenario's `theta` values must
   fall in `[-pi, pi]`; a value like the old `90.0` is ~14 full rotations out of range and would
   fail this immediately.
@@ -299,16 +319,19 @@ Current (100 tests, ~22s):
   closed-loop tracking error must settle under real drivers' own lateral scatter on the same real
   NGSIM lane (the plausibility bar — there's no strict target, no single "correct" in-lane
   position) and produce a deterministic result.
+- Planning unit checks (`test_planning.py`, added with M2, both `ReedsSheppPlanner` and
+  `HybridAStarPlanner`, across all 5 scenarios): the returned path (a) starts at `start` and ends
+  at `goal` within tight tolerance (both planners land exactly on the given poses by construction,
+  not the controller's noisy `tol`), (b) never exceeds curvature `1/turning_radius` at any point
+  (the same style of check that caught the infeasible-Bezier bug during M1 — see DESIGN.md section
+  6), (c) for `HybridAStarPlanner` specifically, on the 3 obstacle scenarios, never comes within
+  the vehicle's radius of any obstacle.
 
-Planned, once `planning/` grows with M2 (currently integration-level coverage is enough, but
-won't scale to multiple planners):
+Planned, still not built (currently integration-level coverage via `test_simulation.py` is
+enough, but won't scale as `sensors.py`/the controllers grow):
 
 - `test_sensors.py`: hand-computed ray/circle intersection cases (obstacle dead ahead, obstacle
   out of range, obstacle behind the beam direction).
-- `test_planning.py`: for each planner, assert the returned path (a) starts at `start` and ends
-  at `goal` within tolerance, (b) never exceeds curvature `1/turning_radius` at any point (this
-  check is what caught the infeasible-Bezier bug during M1 — see DESIGN.md section 6), (c) for
-  Hybrid A* specifically, never comes within the vehicle's radius of any obstacle.
 - `test_control.py`: given a straight-line path and no obstacles, assert each controller's output
   converges toward the goal within a fixed number of steps and within `tol`.
 
@@ -485,3 +508,46 @@ Found while building H3 (lane centering):
   actually bad. Fixed by measuring real convergence distance across the offsets the module is
   actually exercised with and picking a `settle_distance` (150 m) with real margin, rather than a
   round number that happened to work for the first offset tried.
+
+Found while building M2 (Hybrid A* + Reeds-Shepp):
+
+- `ControllerNode`'s reactive sensor-based braking (brakes whenever any obstacle reading is closer
+  than `brake_distance`) was written for M1's Dubins planner, which never deliberately gets close
+  to an obstacle -- so "sensor sees something within `brake_distance`" always meant "unplanned
+  hazard, stop." Once `HybridAStarPlanner` started producing paths that *intentionally* pass within
+  a vehicle length of a parked car as part of a valid avoidance maneuver, that same logic triggered
+  on every such approach and stalled the vehicle before it ever reached the maneuver -- measured
+  directly before assuming anything about *why* the new planner "wasn't working" (`perpendicular_flanked`:
+  0/5 success, 0/5 collision, i.e. braking safely forever, not a planning or tracking failure). Fixed
+  by `hybrid_astar.brake_distance_for(planner)`, deriving a smaller `brake_distance` from the
+  planner's own guaranteed worst-case clearance (`vehicle_radius + safety_margin`, minus a buffer)
+  so genuine avoidance maneuvers never falsely trigger it; `DubinsPlanner`/`ReedsSheppPlanner` keep
+  `ParkingHarness`'s original `brake_distance=3.0` default, since braking is the *only* thing
+  preventing a collision for planners that ignore obstacles.
+- Even after that fix, `parallel_between_cars` (needing a genuine reverse-gear cusp between two
+  close parked cars) still failed for Pure Pursuit -- but this turned out to be a real, consistent
+  controller limitation, not a second planner bug: measured 5/5 collisions across seeds, unchanged
+  across a wide sweep of `brake_distance` and the planner's `safety_margin` (a wider margin just
+  traded the collision for Pure Pursuit never converging at all, ruling out "just needs more
+  buffer" as the fix). This is DESIGN.md section 7's already-documented "no margin when curvature
+  is already at the limit" weakness, concretely realized as an actual safety failure once a planner
+  produces curvature-saturated, obstacle-hugging paths for it to track, rather than the mild
+  efficiency loss it was previously only measured as. MPC's constraint-respecting rollout stays
+  collision-free and converges reliably (5/5 seeds) given a higher step budget (up to ~880 of a
+  raised 1000-step cap -- Hybrid A*'s avoidance routes are longer than M1's direct paths ever
+  needed to be). Documented as a scoped, pinned exception (`tests/test_simulation.py`'s
+  `UNSAFE_COMBINATIONS`, with its own regression test asserting the collision still happens) rather
+  than papered over with a numeric hack -- the honest outcome of measuring rather than assuming.
+- `dubins.py`'s `DubinsPlanner.plan()` was refactored to extract `_solve_csc`/`_csc_points` (family
+  selection and segment-walking, previously inlined) so `reeds_shepp.py` could reuse the exact same
+  CSC formulas rather than re-deriving them -- verified as a true no-behavior-change refactor by
+  re-running the full suite before adding anything new on top of it (same discipline as H2's EKF
+  generalization, re-checking the KITTI RMSE came back bit-for-bit identical).
+- The backward-gear half of `reeds_shepp.py` almost became a second implementation of Dubins's CSC
+  math with signs/headings flipped (the textbook reflect/timeflip transform), until hand-deriving
+  the kinematics directly showed a simpler equivalence: a backward-gear CSC path from A to B is
+  exactly the forward CSC solve from B to A with its point array reversed, headings untouched.
+  Verified against `_arc_points`' actual formula for a turning primitive (two independent
+  derivations landed on identical points) *before* building `hybrid_astar.py` on top of it -- the
+  same "verify before you build on it" discipline as the KITTI axis-convention check and H3's
+  Stanley sign-convention bug, applied one level earlier in the pipeline this time.

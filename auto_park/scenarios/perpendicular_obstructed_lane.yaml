@@ -1,8 +1,8 @@
 # A car sits in the drive aisle directly between the start pose and the stall. The M1
-# baseline planner (Dubins path) doesn't route around it -- it can only brake,
-# so this scenario is expected to stall safely rather than reach the spot. See
-# IMPLEMENTATION.md section 6: resolved once Hybrid A* (M2) lands.
-name: "Perpendicular: obstructed lane (expected to stall, not collide)"
+# baseline planner (Dubins path) doesn't route around it -- it can only brake, so it
+# used to stall safely rather than reach the spot. Resolved by Hybrid A* (M2): both
+# controllers reach the spot 5/5 seeds. See IMPLEMENTATION.md section 3's M2 entry.
+name: "Perpendicular: obstructed lane"
 spot: {x: 0.0, y: 0.0, theta: 1.5707963267948966, size: 2.75}
 start: {x: -10.0, y: 0.0, theta: 0.0, wheelbase: 2.7}
 obstacles:

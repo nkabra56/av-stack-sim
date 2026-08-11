@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from auto_park.environment import Environment
+from auto_park.environment import VEHICLE_RADIUS, Environment
 from auto_park.estimation.ekf import ExtendedKalmanFilter
 from auto_park.interfaces import Controller, Planner
 from auto_park.messaging.bus import Bus
@@ -29,10 +29,6 @@ from auto_park.nodes.vehicle_node import VehicleNode
 from auto_park.sensors import UltrasonicArray
 from auto_park.vehicle import Vehicle
 
-VEHICLE_RADIUS = 1.0  # ego vehicle's own collision-circle radius; must be on the same scale as
-# the ~1.3m obstacle radii used for parked cars in scenarios/*.yaml (see DESIGN.md section 8),
-# not an arbitrary small buffer -- a real car is comparable in size to the cars it's driving
-# among, so its own collision footprint has to be too, or _collided() under-reports real hits.
 DEFAULT_SENSOR_ANGLES = [-0.6, -0.3, 0.0, 0.3, 0.6]
 
 
