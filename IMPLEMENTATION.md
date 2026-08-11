@@ -3,10 +3,12 @@
 This is the build spec for the architecture described in [DESIGN.md](DESIGN.md). Parking-mode
 milestones M1 (correct baseline), the control half of M3 (MPC), ME (state estimation + pub/sub
 architecture), and MV (real-data EKF validation against KITTI) are done. Highway-mode milestones
-**H1 (adaptive cruise control)** and **H2 (fused ego speed via an extended EKF)** are also done —
-the sections below reflect what's actually in the repo today, not just what was planned. Two
-things are next: parking's M2 (Hybrid A* + Reeds-Shepp obstacle routing) and highway's H3 (lane
-centering) — see Section 3 for the full roadmap on both sides.
+**H1 (adaptive cruise control)**, **H2 (fused ego speed via an extended EKF)**, and **H3 (lane
+centering)** are also done — the sections below reflect what's actually in the repo today, not
+just what was planned. Two things are next: parking's M2 (Hybrid A* + Reeds-Shepp obstacle
+routing) and highway's H4 (intersection navigation) — see Section 3 for the full roadmap on both
+sides, and DESIGN.md section 12's H3 entry for what's explicitly *not* done yet (combining H1/H2's
+ACC with H3's lane centering into one closed loop).
 
 ## 1. Directory structure
 
@@ -35,16 +37,20 @@ auto_park/
     kitti_loader.py       # parses KITTI poses.txt -> KittiSequence(times,x,y,theta,v,yaw_rate)
     kitti_ekf_validation.py  # runs the (unmodified) EKF against a real trajectory, EKF vs.
                        # dead-reckoning-only RMSE comparison + plot, see DESIGN.md section 5
-    ngsim_loader.py       # parses NGSIM CSV -> NgsimFollowingPair (leader + follower trajectories)
+    ngsim_loader.py       # parses NGSIM CSV -> NgsimFollowingPair, and (H3) load_lane_centerline()
+                       # -> a real (N,3) lane path from aggregated real vehicle positions
     acc_validation.py      # runs ACC controllers vs. a real leader trajectory, safety/comfort/
                        # plausibility metrics + plot, see DESIGN.md section 11
+    lane_centering_validation.py  # runs Stanley along the real lane centerline, checks
+                       # convergence against real driver lateral scatter, see section 12's H3 entry
   data/
     kitti/
       excerpt_poses.txt      # committed 300-frame excerpt (KITTI seq 09, frames 840-1139)
       ATTRIBUTION.md       # license/citation for the redistributed KITTI excerpt
     ngsim/
       excerpt_trajectories.csv  # committed 780-frame (78s) real leader/follower pair, US-101
-      ATTRIBUTION.md       # license/citation for the redistributed NGSIM excerpt
+      lane_centerline.csv     # derived real lane centerline (H3), ~10,400 positions aggregated
+      ATTRIBUTION.md       # license/citation for the redistributed + derived NGSIM data
   nodes/
     __init__.py
     vehicle_node.py       # ground truth + odometry publisher; owns accel/steering limits
@@ -73,6 +79,7 @@ auto_park/
     pure_pursuit.py        # adaptive Pure Pursuit, acts on HasPose (a Vehicle or a pose estimate)
     mpc.py              # nonlinear MPC (direct shooting, SLSQP)
     acc.py              # IDMController + MpcAccController (longitudinal, see DESIGN.md section 11)
+    lane_centering.py       # StanleyController (lateral, see DESIGN.md section 12's H3 entry)
   visualization/
     __init__.py
     animate.py            # true vs. estimated trajectory + covariance ellipse + planned path
@@ -91,6 +98,8 @@ tests/
   test_simulation.py       # integration tests, harness-based, across scenarios x controllers x seeds
   test_acc.py            # IDM/MPC-ACC unit + synthetic braking-lead scenario checks
   test_acc_validation.py    # IDM/MPC-ACC vs. real NGSIM data: safety, plausibility, determinism
+  test_lane_centering.py    # Stanley convergence (both directions) + steering/speed edge cases
+  test_lane_centering_validation.py  # Stanley vs. the real derived lane centerline
 pyproject.toml
 DESIGN.md
 IMPLEMENTATION.md
@@ -216,8 +225,19 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   Effect on H1's outcomes: realized minimum gap shifted by only 4-8 cm — see DESIGN.md section 12
   for the full account, including why H1's use of the 4-state filter has two degenerate
   dimensions (x/y/theta don't do much until H3 adds real lateral motion) and why that's an
-  accepted forward-compatibility tradeoff, not an oversight. M2 (below) and H3 (DESIGN.md section
-  12) are next, in either order — they're independent.
+  accepted forward-compatibility tradeoff, not an oversight.
+- **H3 — Lane centering: done.** `control/lane_centering.py`'s `StanleyController`, validated
+  against `data/ngsim/lane_centerline.csv` — a real lane centerline derived from ~10,400 actual
+  vehicle positions (not hand-authored), with genuine curvature (1.76m end-to-end lateral drift
+  over 642m). `validation/lane_centering_validation.py` checks closed-loop convergence against
+  real drivers' own lateral scatter on the same lane (the plausibility bar, since there's no
+  single "correct" in-lane position to replay against the way H1 had a real leader trajectory).
+  See DESIGN.md section 12's H3 entry for a real sign-convention bug caught by a standalone
+  convergence test before any validation module existed to catch it later (the controller
+  diverged from a 2m offset to 374m within 30 seconds when the cross-track-error sign was
+  backwards), and for what's explicitly deferred: combining H1/H2's ACC with H3's Stanley control
+  into one closed loop over a single `Vehicle` is real follow-up work, not done in this pass.
+  M2 (below) and H4 (DESIGN.md section 12) are next, in either order — they're independent.
 - **M2 — Planning (next up)**: implement `reeds_shepp.py`, then `hybrid_astar.py` on top of it;
   replace the fixed Dubins path with Hybrid A* as the default planner, planning from the pose
   *estimate* (already how `PlannerNode` is wired — no further node changes needed). Validate
@@ -232,11 +252,11 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   trajectory, a covariance ellipse, and the planned path (landed as part of ME, since the whole
   point of adding an estimator is visible directly in that comparison). Still open: a genuinely
   multi-panel layout (live sensor readings, speed profile) alongside the top-down view.
-- **M6 — Tests & CI**: 91 tests across both modes run in ~21s; no GitHub Actions workflow yet.
+- **M6 — Tests & CI**: 100 tests across both modes run in ~22s; no GitHub Actions workflow yet.
 
 ## 4. Testing strategy
 
-Current (91 tests, ~21s):
+Current (100 tests, ~22s):
 
 - Kinematic checks: driving straight for N steps moves `x` by `v*N*dt` with `theta` unchanged; a
   fixed steering angle over time traces a circle of radius `L / tan(delta)`; `turning_radius`
@@ -251,7 +271,7 @@ Current (91 tests, ~21s):
 - Integration, parametrized over both controllers, run against `ParkingHarness`: on the two
   obstacle-free scenarios, assert a **success rate â‰¥4/5 across 5 fixed seeds** (not single-run
   determinism — Section "Control" tradeoffs in DESIGN.md explains why a rate, not 100%, is the
-  right thing to assert once real noise is in the loop). On *every* scenario Ã— controller Ã— seed
+  right thing to assert once real noise is in the loop). On *every* scenario × controller × seed
   (50 combinations), assert not `.collision` — safety has to hold regardless of estimation noise,
   including on the three scenarios that aren't expected to reach the spot.
 - Regression guard for the original degrees/radians bug: every scenario's `theta` values must
@@ -269,6 +289,13 @@ Current (91 tests, ~21s):
   (hard pass/fail, ground truth, same principle as parking's `test_never_collides`), land in a
   plausible gap range relative to the real recorded follower (not a strict match), and produce a
   deterministic result for a fixed seed.
+- Lane-centering unit checks: converges from a lateral offset on both sides (not just one, since
+  a sign bug can look correct from only one direction — this is exactly how one was found, see
+  Section 6), steering stays within `max_steer`, near-zero speed doesn't blow up the correction.
+- Real-data validation (lane centering): from three different initial offsets, Stanley's
+  closed-loop tracking error must settle under real drivers' own lateral scatter on the same real
+  NGSIM lane (the plausibility bar — there's no strict target, no single "correct" in-lane
+  position) and produce a deterministic result.
 
 Planned, once `planning/` grows with M2 (currently integration-level coverage is enough, but
 won't scale to multiple planners):
@@ -308,6 +335,7 @@ python -m auto_park.demo <scenario> --seed 7               # override the scenar
 python -m auto_park.demo <scenario> --save out.gif         # save a GIF for the README
 python -m auto_park.validation.kitti_ekf_validation --plot out.png   # EKF vs. real KITTI data
 python -m auto_park.validation.acc_validation --controller mpc --plot out.png  # ACC vs. real NGSIM data
+python -m auto_park.validation.lane_centering_validation --plot out.png  # Stanley vs. real NGSIM lane geometry
 ```
 
 ## 6. Known issues
@@ -418,11 +446,11 @@ Found while building H1 (adaptive cruise control):
   if you don't sanity-check row counts). Fixed by keying on `global_time`, NGSIM's one genuinely
   monotonic, non-resetting timestamp, and verifying the extracted excerpt's consecutive timestamps
   are all exactly 100ms apart before committing it.
-- `IDMController`'s raw formula returned -1309 m/sÂ² for a plausible close-range, fast-closing
+- `IDMController`'s raw formula returned -1309 m/s² for a plausible close-range, fast-closing
   scenario in a standalone sanity check, run *before* the controller was wired into any node.
   The model's `(s*/gap)^2` interaction term is mathematically unbounded as gap shrinks; nothing in
   the textbook formula itself imposes a physical floor. Fixed by clipping to `a_min` (default -9
-  m/sÂ², ~1g). Catching this via an isolated unit test rather than a failing integration test is
+  m/s², ~1g). Catching this via an isolated unit test rather than a failing integration test is
   the point of testing controllers standalone before wiring them into a harness — same lesson as
   M1's original Bezier-curve curvature bug, just one component earlier in the pipeline this time.
 - `MpcAccController`'s hard `gap(t) >= min_gap` constraint was violated in the closed-loop
@@ -435,3 +463,22 @@ Found while building H1 (adaptive cruise control):
   `min_gap` values tested) and set the default from that measurement (3.0 m) rather than picking
   a value that merely looked sufficient on paper. See DESIGN.md section 11 for the full
   explanation and section 12 for the proper long-term fix (robust/stochastic MPC).
+
+Found while building H3 (lane centering):
+
+- `StanleyController`'s first implementation defined cross-track error with the sign backwards —
+  the correction term steered *away* from the path instead of toward it. This didn't raise an
+  exception or look obviously wrong from reading the formula; it just diverged, from a 2 m initial
+  offset to 374 m within 30 simulated seconds, caught by a direct standalone convergence check run
+  before building the validation module on top of it (same lesson as H1's IDM deceleration-floor
+  bug: test controllers in isolation before wiring them into anything that could mask the
+  failure). `tests/test_lane_centering.py` now checks convergence from both directions
+  specifically, since a flipped sign can look correct from only one side of the path.
+- `lane_centering_validation.py`'s first `settle_distance` default (50 m) was calibrated against
+  a small initial offset and didn't generalize: at highway speed, convergence distance scales with
+  how large the initial offset is (measured directly: ~66 m for a 1.5 m offset, ~94 m for 3.0 m),
+  so a 3.0 m offset test failed the real-driver-scatter plausibility check simply because it
+  hadn't finished converging yet at the point the check was measured, not because tracking was
+  actually bad. Fixed by measuring real convergence distance across the offsets the module is
+  actually exercised with and picking a `settle_distance` (150 m) with real margin, rather than a
+  round number that happened to work for the first offset tried.

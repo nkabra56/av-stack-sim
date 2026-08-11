@@ -451,12 +451,39 @@ not a strict target, since the real driver isn't assumed optimal).
   linearization at all) is a deliberate forward-compatibility tradeoff: H3 needs the full state
   anyway, and building a throwaway 1D filter just for H1 would mean redoing this integration work
   a second time.
-- **H3 — Lane centering.** Stanley controller (`delta = heading_error + atan2(k *
-  cross_track_error, v)`) — the classical lane-keeping law, playing the same "geometric baseline"
-  role Pure Pursuit and IDM play elsewhere. Lane geometry derived from NGSIM's per-lane position
-  data (the same dataset validates both H1 and H3) rather than hand-authored. Brings the full 2D
-  `Vehicle` bicycle model back into the highway mode, combined with ACC for full longitudinal +
-  lateral highway driving.
+- **H3 — Lane centering: done.** Stanley controller (`control/lane_centering.py`:
+  `delta = heading_error + atan2(k * cross_track_error, v)`) — the classical lane-keeping law,
+  playing the same "geometric baseline" role Pure Pursuit and IDM play elsewhere. Cross-track
+  error is measured at the *front axle*, not the vehicle's rear-axle reference point — steering
+  corrects what's actually about to leave the lane. Brings the full 2D `Vehicle` bicycle model
+  back into the highway mode (unmodified, same as parking uses it).
+
+  **Real lane geometry, not hand-authored**: `lane_centerline.csv` aggregates ~10,400 individual
+  real vehicle positions from NGSIM's US-101 lane 2 (the full download, not just H1's committed
+  leader/follower excerpt), binned every 2m and lightly smoothed — a genuine 1.76m end-to-end
+  lateral drift over 642m, real curvature nobody typed in by hand. The same dataset now validates
+  both H1 (real time-series replay) and H3 (real spatial geometry), two different uses of one
+  source. Validation methodology differs from H1's replay style, though: NGSIM records where real
+  drivers actually *were*, not a reference path independent of their own steering — so there's no
+  "real trajectory" to replay a controller against the way there was a real leader's speed
+  profile. Instead, `validation/lane_centering_validation.py` checks that Stanley's closed-loop
+  tracking error, once settled, stays under real drivers' own lateral positioning scatter on this
+  lane (std ≈0.46 m) — the plausibility bar, not a strict target, since there's no single
+  "correct" lateral position within a lane.
+
+  **A real sign-convention bug, caught the same way H1's bugs were** — standalone, before
+  anything downstream could mask it: the first implementation defined cross-track error with the
+  sign flipped, so the correction term steered *away* from the path instead of toward it. This
+  didn't error or look obviously wrong in the formula — it just diverged, from a 2 m offset to
+  374 m within 30 seconds, caught by a direct convergence check run before building the
+  validation module on top of it. `tests/test_lane_centering.py` now checks convergence from
+  *both* directions specifically because a sign bug can look correct from only one side.
+
+  **Explicitly not yet done**: this validates Stanley alone (constant assumed speed, lateral
+  control only) — it does not yet combine with ACC (H1/H2) into one closed loop where a single
+  `Vehicle` takes both an ACC-computed speed and a Stanley-computed steering angle each tick.
+  That integration is real follow-up work, not attempted in this pass, the same way H1 shipped
+  ACC standalone before H2 extended it rather than building everything simultaneously.
 - **H4 — Intersection navigation.** Rule-based right-of-way state machine for a
   stop-sign-controlled intersection, built on H1 + H3 rather than new control theory — mostly
   reasoning wired on top of existing control. Validated against hand-authored scenarios (same

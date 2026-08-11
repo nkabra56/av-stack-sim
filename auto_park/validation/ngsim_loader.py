@@ -26,6 +26,7 @@ FEET_TO_METERS = 0.3048
 DEFAULT_EXCERPT_PATH = Path(__file__).parent.parent / "data" / "ngsim" / "excerpt_trajectories.csv"
 DEFAULT_LEADER_ID = 9
 DEFAULT_FOLLOWER_ID = 12
+DEFAULT_LANE_CENTERLINE_PATH = Path(__file__).parent.parent / "data" / "ngsim" / "lane_centerline.csv"
 
 
 @dataclass
@@ -81,3 +82,19 @@ def load_following_pair(
     return NgsimFollowingPair(
         leader=leader, follower=follower, real_space_headway=real_space_headway, real_time_headway=real_time_headway
     )
+
+
+def load_lane_centerline(path: str | Path = DEFAULT_LANE_CENTERLINE_PATH) -> np.ndarray:
+    """Returns an (N, 3) x/y/theta path along a real, NGSIM-derived lane centerline
+    (see auto_park/data/ngsim/ATTRIBUTION.md for how it was derived -- aggregated from
+    ~10,400 real vehicle positions, not hand-authored), in the same (N, 3) format
+    Planner.plan() returns for the parking mode, so Stanley control (control/
+    lane_centering.py) can be validated the same way parking's path-tracking
+    controllers are: given a real path, does the controller track it.
+    """
+    rows = _read_rows(path)
+    position = np.array([float(r["position_m"]) for r in rows])
+    lateral = np.array([float(r["lateral_offset_m"]) for r in rows])
+    heading = np.arctan2(np.diff(lateral), np.diff(position))
+    heading = np.append(heading, heading[-1])
+    return np.column_stack([position, lateral, heading])

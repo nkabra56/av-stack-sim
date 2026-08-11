@@ -2,10 +2,10 @@
 
 A from-scratch autonomous-driving stack covering two regimes on one shared architecture:
 **parking** (state estimation, Dubins path planning, Pure Pursuit/MPC control at <2 m/s) and
-**highway driving**, starting with **adaptive cruise control** (IDM and constrained-MPC
-longitudinal control, validated against real freeway traffic data). Both run on the same
-pub/sub node graph (topics + typed messages, no ROS2 dependency) and the same
-`ExtendedKalmanFilter`, rather than one big direct-call loop per mode.
+**highway driving** — **adaptive cruise control** (IDM and constrained-MPC longitudinal control)
+and **lane centering** (Stanley lateral control), both validated against real freeway traffic
+data. Both regimes run on the same pub/sub node graph (topics + typed messages, no ROS2
+dependency) and the same `ExtendedKalmanFilter`, rather than one big direct-call loop per mode.
 
 <!-- ![perpendicular parking demo](docs/perpendicular_demo.gif) -->
 <!-- ![parallel parking demo](docs/parallel_demo.gif) -->
@@ -34,8 +34,15 @@ pub/sub node graph (topics + typed messages, no ROS2 dependency) and the same
 - **A recurring "classical/reactive vs. optimization-based" controller comparison**, applied
   twice: Pure Pursuit vs. MPC for parking path-tracking, and IDM vs. constrained-MPC for highway
   car-following — same underlying design tradeoff (closed-form and cheap vs. predictive and
-  constraint-aware), two different control problems. Details in
-  [DESIGN.md](DESIGN.md#7-control) and [DESIGN.md](DESIGN.md#11-adaptive-cruise-control-h1).
+  constraint-aware), two different control problems. Lane centering (Stanley) plays the same
+  "classical baseline" role a third time, once paired with a future optimization-based
+  alternative. Details in [DESIGN.md](DESIGN.md#7-control) and
+  [DESIGN.md](DESIGN.md#11-adaptive-cruise-control-h1).
+- **A real lane geometry, not a hand-authored curve**: `lane_centerline.csv` aggregates ~10,400
+  actual vehicle positions from real NGSIM freeway data into a centerline with genuine curvature
+  (1.76m of real lateral drift over 642m) — the Stanley lane-centering controller is validated
+  against this, tracking within real drivers' own lateral scatter on the same lane. Details in
+  [DESIGN.md](DESIGN.md#12-highway-mode-roadmap-h2-h4).
 - **Evaluated like a stochastic system, because it is one**: with real sensor noise in the loop,
   success is asserted as a rate across 5 fixed seeds, not a single deterministic run — and safety
   (no collision) is asserted on every scenario × controller × seed combination, always against
@@ -57,7 +64,7 @@ pub/sub node graph (topics + typed messages, no ROS2 dependency) and the same
   [IMPLEMENTATION.md](IMPLEMENTATION.md#6-known-issues)'s known-issues log.
 - A tested, modular codebase — planners, controllers, and nodes are swappable behind common
   interfaces (see [IMPLEMENTATION.md](IMPLEMENTATION.md#2-key-interfaces)), not a single
-  hardcoded pipeline. 87 tests, ~22s.
+  hardcoded pipeline. 100 tests, ~22s.
 - Scenarios that are honest about current limits: two parking scenarios have a clear path and
   both controllers reach the spot reliably; three place an obstacle where the fixed Dubins path
   can't route around it, asserted safe (no collision) rather than pretending success — the gap
@@ -75,7 +82,7 @@ Python, NumPy, SciPy, Matplotlib, PyYAML, pytest.
 
 ```bash
 pip install -e .
-pytest                                                     # run the test suite (~22s, 87 tests)
+pytest                                                     # run the test suite (~22s, 100 tests)
 
 # Parking
 python -m auto_park.demo perpendicular_open                # Pure Pursuit, show the animation
@@ -84,9 +91,12 @@ python -m auto_park.demo perpendicular_open --seed 7             # different noi
 python -m auto_park.demo perpendicular_open --save out.gif      # save a GIF
 python -m auto_park.validation.kitti_ekf_validation --plot out.png   # EKF vs. real KITTI data
 
-# Highway (adaptive cruise control)
+# Highway: adaptive cruise control
 python -m auto_park.validation.acc_validation --controller idm --plot out.png   # IDM vs. real NGSIM data
 python -m auto_park.validation.acc_validation --controller mpc --plot out.png   # MPC-ACC instead
+
+# Highway: lane centering
+python -m auto_park.validation.lane_centering_validation --plot out.png   # Stanley vs. a real NGSIM lane
 ```
 
 Other parking scenarios: `perpendicular_flanked`, `perpendicular_obstructed_lane`,
@@ -100,16 +110,18 @@ auto_park/
   environment.py         # parking lot, spots, obstacles
   scenario_loader.py       # loads scenarios/*.yaml
   messaging/             # Bus + typed messages (pub/sub backbone, shared by both modes)
-  estimation/            # EKF (odometry + compass + position-fix + landmark fusion)
-  validation/            # EKF vs. real KITTI data; ACC vs. real NGSIM data
+  estimation/            # EKF: 3-state (parking, odometry+compass+position+landmark fusion)
+                       # + 4-state speed-estimating mode (highway, H2)
+  validation/            # EKF vs. real KITTI data; ACC + lane centering vs. real NGSIM data
   data/                # committed KITTI + NGSIM excerpts used by validation/ and its tests
   nodes/               # parking: VehicleNode, SensorNode, EstimatorNode, PlannerNode,
                        # ControllerNode -- highway: LeadVehicleNode, EgoLongitudinalNode,
-                       # RadarNode, AccControllerNode
+                       # RadarNode, SpeedEstimatorNode, AccControllerNode
   harness.py            # tick-based executor (parking mode)
   highway_harness.py       # tick-based executor (ACC/highway mode)
   planning/             # dubins.py (built); reeds_shepp.py, hybrid_astar.py (next)
-  control/              # pure_pursuit.py, mpc.py (parking) -- acc.py (highway: IDM + MPC-ACC)
+  control/              # pure_pursuit.py, mpc.py (parking) -- acc.py, lane_centering.py (highway:
+                       # IDM + MPC-ACC, Stanley)
   visualization/          # true-vs-estimated trajectory + covariance ellipse animation
   scenarios/*.yaml         # parking scenario definitions
 tests/                  # unit + integration tests
@@ -125,8 +137,11 @@ M3 (MPC), state estimation + the pub/sub node architecture, and real-data EKF va
 are all done. M2 (Hybrid A* + Reeds-Shepp obstacle routing) is next.
 
 **Highway**: H1 (adaptive cruise control: IDM + constrained-MPC, validated against real NGSIM
-data) and H2 (fused ego speed via the same EKF, extended without touching its already-validated
-3-state parking path) are done. H3 (lane centering) and H4 (intersection navigation) are next.
+data), H2 (fused ego speed via the same EKF, extended without touching its already-validated
+3-state parking path), and H3 (lane centering: Stanley control against a real derived NGSIM lane
+geometry) are done. H4 (intersection navigation) is next. Combining H1/H2's ACC with H3's lane
+centering into one closed loop over a single vehicle is real follow-up work, not done yet — see
+IMPLEMENTATION.md's H3 milestone entry.
 
 See the milestone list in [IMPLEMENTATION.md](IMPLEMENTATION.md#3-milestones) and DESIGN.md's
 [highway-mode roadmap](DESIGN.md#12-highway-mode-roadmap-h2-h4) for full progress, and the
