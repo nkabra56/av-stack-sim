@@ -1,11 +1,11 @@
 # Auto-Park Controller
 
-A from-scratch simulation of autonomous car parking: **state estimation** (an Extended Kalman
-Filter fusing noisy odometry, compass, position-fix, and landmark sensors), **path planning**
-(Dubins paths today, Hybrid A* + Reeds-Shepp next), and **path tracking control** (Pure Pursuit
-and nonlinear MPC) — wired together as a small pub/sub node graph (topics + typed messages, no
-ROS2 dependency) rather than one big direct-call loop, with matplotlib-animated top-down
-visualizations of true vs. estimated trajectory.
+A from-scratch autonomous-driving stack covering two regimes on one shared architecture:
+**parking** (state estimation, Dubins path planning, Pure Pursuit/MPC control at <2 m/s) and
+**highway driving**, starting with **adaptive cruise control** (IDM and constrained-MPC
+longitudinal control, validated against real freeway traffic data). Both run on the same
+pub/sub node graph (topics + typed messages, no ROS2 dependency) and the same
+`ExtendedKalmanFilter`, rather than one big direct-call loop per mode.
 
 <!-- ![perpendicular parking demo](docs/perpendicular_demo.gif) -->
 <!-- ![parallel parking demo](docs/parallel_demo.gif) -->
@@ -31,27 +31,37 @@ visualizations of true vs. estimated trajectory.
   earlier Bezier-curve version looked fine but demanded steering angles beyond the vehicle's
   physical limits; see [DESIGN.md](DESIGN.md#6-path-planning) for what that bug looked like and
   why Dubins paths fix it by construction).
-- **Two path-tracking controllers, compared head-to-head on the same paths and the same noise**:
-  geometric/reactive Pure Pursuit vs. a nonlinear MPC (direct-shooting, solved with
-  `scipy.optimize`). Both converge reliably on open scenarios; MPC is measurably more robust both
-  on curvature-saturated paths and under estimation noise, where Pure Pursuit's reactive steering
-  has less margin. Details in [DESIGN.md](DESIGN.md#7-control).
+- **A recurring "classical/reactive vs. optimization-based" controller comparison**, applied
+  twice: Pure Pursuit vs. MPC for parking path-tracking, and IDM vs. constrained-MPC for highway
+  car-following — same underlying design tradeoff (closed-form and cheap vs. predictive and
+  constraint-aware), two different control problems. Details in
+  [DESIGN.md](DESIGN.md#7-control) and [DESIGN.md](DESIGN.md#11-adaptive-cruise-control-h1).
 - **Evaluated like a stochastic system, because it is one**: with real sensor noise in the loop,
   success is asserted as a rate across 5 fixed seeds, not a single deterministic run — and safety
   (no collision) is asserted on every scenario × controller × seed combination, always against
   ground truth, never against the filter's own (possibly optimistic) estimate of itself.
-- **Validated against real driving data, not just synthetic noise**: the same, unmodified EKF
-  replayed against a real trajectory from the **KITTI Odometry benchmark** (a committed 300-frame
-  excerpt with genuine turns) — **0.85 m RMSE with corrections vs. 4.97 m dead-reckoning-only, an
-  83% reduction**, against ground truth nobody hand-picked to be filter-friendly. Details in
-  [DESIGN.md](DESIGN.md#validation-against-real-data).
+- **Validated against real-world data, twice, two different ways**: the unmodified EKF replayed
+  against real **KITTI Odometry** ground truth (a committed excerpt with genuine turns) —
+  **0.85 m RMSE with corrections vs. 4.97 m dead-reckoning-only, an 83% reduction**; and both ACC
+  controllers replayed against a real 78-second **NGSIM** freeway car-following trajectory
+  (congested US-101 traffic, including a full stop), evaluated on safety, comfort, and
+  plausibility against what the real recorded driver actually did. Neither dataset needed
+  registration — both were fetched directly from public, no-login sources. Details in
+  [DESIGN.md](DESIGN.md#5-state-estimation) and [DESIGN.md](DESIGN.md#11-adaptive-cruise-control-h1).
+- **Real bugs found by validating against real data, not just synthetic noise** — and documented,
+  not hidden: a car-following model whose textbook formula has no physical deceleration floor (a
+  standalone unit test caught it demanding -1309 m/s² before any node existed to catch it later);
+  an MPC hard safety constraint that a real recorded traffic stop revealed could still be violated
+  in a standstill-recovery edge case, fixed by measuring the actual erosion rather than guessing a
+  safe-looking number. Full account in
+  [IMPLEMENTATION.md](IMPLEMENTATION.md#6-known-issues)'s known-issues log.
 - A tested, modular codebase — planners, controllers, and nodes are swappable behind common
   interfaces (see [IMPLEMENTATION.md](IMPLEMENTATION.md#2-key-interfaces)), not a single
-  hardcoded pipeline. 76 tests, ~11s.
-- Scenarios that are honest about the current planner's limits: two scenarios have a clear path
-  and both controllers reach the spot reliably; three place an obstacle where the fixed Dubins
-  path can't route around it, and are asserted safe (no collision) rather than pretending the
-  vehicle parks successfully. That gap is exactly what the next milestone (Hybrid A*) closes.
+  hardcoded pipeline. 87 tests, ~22s.
+- Scenarios that are honest about current limits: two parking scenarios have a clear path and
+  both controllers reach the spot reliably; three place an obstacle where the fixed Dubins path
+  can't route around it, asserted safe (no collision) rather than pretending success — the gap
+  the next milestone (Hybrid A*) closes.
 
 For the algorithmic reasoning, tradeoffs, and what real bugs looked like along the way, see
 **[DESIGN.md](DESIGN.md)**. For the module breakdown, milestones, and testing strategy, see
@@ -65,16 +75,22 @@ Python, NumPy, SciPy, Matplotlib, PyYAML, pytest.
 
 ```bash
 pip install -e .
-pytest                                                     # run the test suite (~11s, 76 tests)
+pytest                                                     # run the test suite (~22s, 87 tests)
+
+# Parking
 python -m auto_park.demo perpendicular_open                # Pure Pursuit, show the animation
 python -m auto_park.demo perpendicular_open --controller mpc   # MPC instead
 python -m auto_park.demo perpendicular_open --seed 7             # different noise realization
 python -m auto_park.demo perpendicular_open --save out.gif      # save a GIF
 python -m auto_park.validation.kitti_ekf_validation --plot out.png   # EKF vs. real KITTI data
+
+# Highway (adaptive cruise control)
+python -m auto_park.validation.acc_validation --controller idm --plot out.png   # IDM vs. real NGSIM data
+python -m auto_park.validation.acc_validation --controller mpc --plot out.png   # MPC-ACC instead
 ```
 
-Other scenarios: `perpendicular_flanked`, `perpendicular_obstructed_lane`, `parallel_open`,
-`parallel_between_cars`.
+Other parking scenarios: `perpendicular_flanked`, `perpendicular_obstructed_lane`,
+`parallel_open`, `parallel_between_cars`.
 
 ## Project structure
 
@@ -83,16 +99,19 @@ auto_park/
   vehicle.py           # kinematic bicycle model + turning_radius
   environment.py         # parking lot, spots, obstacles
   scenario_loader.py       # loads scenarios/*.yaml
-  messaging/             # Bus + typed messages (pub/sub backbone)
+  messaging/             # Bus + typed messages (pub/sub backbone, shared by both modes)
   estimation/            # EKF (odometry + compass + position-fix + landmark fusion)
-  validation/            # EKF validated against real KITTI Odometry ground truth
-  data/kitti/             # committed KITTI excerpt used by validation/ and its tests
-  nodes/               # VehicleNode, SensorNode, EstimatorNode, PlannerNode, ControllerNode
-  harness.py            # tick-based executor tying the node graph together
+  validation/            # EKF vs. real KITTI data; ACC vs. real NGSIM data
+  data/                # committed KITTI + NGSIM excerpts used by validation/ and its tests
+  nodes/               # parking: VehicleNode, SensorNode, EstimatorNode, PlannerNode,
+                       # ControllerNode -- highway: LeadVehicleNode, EgoLongitudinalNode,
+                       # RadarNode, AccControllerNode
+  harness.py            # tick-based executor (parking mode)
+  highway_harness.py       # tick-based executor (ACC/highway mode)
   planning/             # dubins.py (built); reeds_shepp.py, hybrid_astar.py (next)
-  control/              # pure_pursuit.py, mpc.py
+  control/              # pure_pursuit.py, mpc.py (parking) -- acc.py (highway: IDM + MPC-ACC)
   visualization/          # true-vs-estimated trajectory + covariance ellipse animation
-  scenarios/*.yaml         # scenario definitions
+  scenarios/*.yaml         # parking scenario definitions
 tests/                  # unit + integration tests
 ```
 
@@ -101,13 +120,17 @@ each file is responsible for.
 
 ## Status
 
-M1 (correct baseline: Dubins planner, both controllers, realistic scenarios, tests) and M3 (MPC)
-are done. State estimation + the pub/sub node architecture (EKF, `messaging/`, `nodes/`,
-`harness.py`) are also done, replacing what used to be a direct-call simulation loop over
-ground-truth pose — and validated against real KITTI Odometry data, not just synthetic noise.
-M2 (Hybrid A* + Reeds-Shepp obstacle routing) is next — see the milestone list in
-[IMPLEMENTATION.md](IMPLEMENTATION.md#3-milestones) for full progress and the known-issues log of
-what was actually broken and fixed along the way.
+**Parking**: M1 (correct baseline: Dubins planner, both controllers, realistic scenarios, tests),
+M3 (MPC), state estimation + the pub/sub node architecture, and real-data EKF validation (KITTI)
+are all done. M2 (Hybrid A* + Reeds-Shepp obstacle routing) is next.
+
+**Highway**: H1 (adaptive cruise control: IDM + constrained-MPC, validated against real NGSIM
+data) is done. H2 (extend the EKF with a speed state), H3 (lane centering), and H4 (intersection
+navigation) are next.
+
+See the milestone list in [IMPLEMENTATION.md](IMPLEMENTATION.md#3-milestones) and DESIGN.md's
+[highway-mode roadmap](DESIGN.md#12-highway-mode-roadmap-h2-h4) for full progress, and the
+known-issues log for what was actually broken and fixed along the way on both sides.
 
 ## License
 

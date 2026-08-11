@@ -2,9 +2,16 @@
 
 ## 1. Problem statement & goals
 
-This project simulates an autonomous vehicle parking itself into a perpendicular or parallel
-spot, given a start pose, a goal spot, and a set of static obstacles. It covers the **planning
-and control** stack of an autonomous parking system end-to-end in simulation:
+This project covers two driving regimes on one shared architecture: **parking-lot maneuvers**
+(Sections 2-10 below — planning, control, and estimation for perpendicular/parallel parking at
+<2 m/s) and, starting with adaptive cruise control (Section 11), a growing **highway driving**
+mode (longitudinal control now; lane centering, richer sensor fusion, and intersection
+navigation are next — Section 12). Both share the same pub/sub node architecture, the same
+`ExtendedKalmanFilter`, and the same "classical/reactive vs. optimization-based" controller
+comparison device, applied to whatever the driving task actually is.
+
+The parking mode covers **planning and control** for autonomous parking end-to-end in
+simulation:
 
 - Given a start pose and a target spot, **plan** a kinematically-feasible path (forward and
   reverse) that avoids obstacles.
@@ -13,12 +20,14 @@ and control** stack of an autonomous parking system end-to-end in simulation:
   didn't already account for (e.g. re-plan or brake).
 - **Visualize** the result as an animated top-down view, suitable for a GIF.
 
-Explicitly out of scope: mapping/SLAM (the environment's obstacle positions are known/mapped in
-advance — the vehicle localizes against them, it doesn't build the map), 3D/terrain, and
-multi-agent/dynamic traffic. Localization error is *not* out of scope, unlike an earlier version
-of this document said — see Section 5. This is a planning+control+estimation simulation, not a
-full AV stack — that scope boundary is deliberate so the project stays focused on the algorithms
-it's meant to showcase rather than becoming a shallow attempt at everything.
+Explicitly out of scope, project-wide: mapping/SLAM (obstacle/landmark positions are known/mapped
+in advance — the vehicle localizes against them, it doesn't build the map), 3D/terrain, and
+perception-level sensor fusion (detecting/tracking *other* agents from raw camera/lidar data —
+the highway mode's "sensor fusion" milestone, Section 12, extends the *ego* pose estimator, the
+same kind of fusion already built for parking, not object detection). This is a
+planning+control+estimation simulation, not a full production AV stack — that scope boundary is
+deliberate so the project stays focused on demonstrating the algorithms rather than becoming a
+shallow attempt at everything a real AV company's stack does.
 
 ## 2. System architecture
 
@@ -347,3 +356,94 @@ selectable per scenario via `demo.py --controller mpc`.
   drawn deliberately close to how a real ROS2 graph would be structured, specifically so that
   swapping the in-process `Bus` for real ROS2 topics later wouldn't require redesigning the nodes
   themselves — only how they publish/subscribe.
+
+## 11. Adaptive cruise control (H1)
+
+The first highway-mode capability: given a lead vehicle ahead, control the ego vehicle's
+longitudinal acceleration to follow it safely and comfortably. Straight-line only (no steering)
+— lane centering (Section 12, H3) adds the lateral half. Reuses `messaging/`'s pub/sub pattern
+(`LeadVehicleStateMsg`, `RadarMsg`, `LongitudinalCmdMsg`) and the "ground-truth node the
+controller never sees directly" principle (`EgoLongitudinalStateMsg`/`LeadVehicleStateMsg` are
+only consumed by `RadarNode` and the harness's own evaluation logic; `AccControllerNode` only
+ever sees noisy radar), but with a lightweight 1D point-mass ego model
+(`nodes/ego_longitudinal_node.py`) rather than the full 2D kinematic bicycle `Vehicle` — H1 is a
+straight-line problem, so the extra state (heading, steering) would be unused until H3 brings
+lateral control into the picture.
+
+**Two controllers**, the same comparison device used for parking (Pure Pursuit vs. MPC), applied
+to car-following instead of path tracking:
+
+- **IDM (Intelligent Driver Model)**, Treiber, Hennecke & Helbing (2000) — the literature-standard
+  car-following law, closed-form and reactive like Pure Pursuit was:
+  `a = a_max * (1 - (v/v0)^delta - (s*/s)^2)`, where the desired gap
+  `s* = s0 + v*T + (v*Δv) / (2*sqrt(a_max*b))` combines a minimum standstill distance, a
+  time-headway term, and a closing-speed term. Reference parameter ranges are from the original
+  paper and widely-used traffic-simulation defaults (e.g. SUMO's), not hand-tuned for this
+  project. The raw formula's `(s*/gap)^2` interaction term is **unbounded** as gap shrinks — a
+  real car can't decelerate at whatever multiple of `a_max` that implies, so the controller clips
+  its output to a physical floor (`a_min`, default -9 m/s², ~1g emergency braking) — this was
+  caught by a standalone sanity test *before* wiring the controller into a node (it returned
+  -1309 m/s² for a plausible close/closing scenario), not discovered later via a failing
+  integration test.
+- **MPC-based ACC**, reusing the direct-shooting SLSQP pattern from `control/mpc.py`, but a step
+  beyond the parking MPC: parking's MPC only used box bounds; this one adds a genuine nonlinear
+  **inequality constraint** (`gap(t) >= min_gap` at every step in the horizon, via
+  `scipy.optimize.minimize`'s `constraints` argument) — a hard safety constraint enforced by the
+  optimizer itself, not folded into the cost as a soft, tradeable-off penalty. The lead vehicle is
+  assumed to hold constant velocity over the horizon (the standard simplifying prediction used in
+  real ACC/MPC literature), re-solved every tick from the latest radar reading so it's
+  continuously corrected rather than a long-range forecast.
+
+**A real finding from validating against NGSIM** (not a hypothetical caveat): if the ego ever
+ends up closer than `min_gap` while both vehicles are stopped — which can happen during the
+approach to a standstill in real stop-and-go traffic — there is *no feasible acceleration
+sequence* that satisfies the constraint from there, since moving apart from a standstill would
+require driving backward, which the ego can't do. The constrained optimization becomes locally
+infeasible, and SLSQP silently returns its best constraint-violating attempt rather than failing
+loudly. This is a genuine property of *nominal* (non-robust) MPC under model mismatch between the
+constant-velocity prediction and real driver behavior, not a bug to hide: across a range of
+`min_gap` values, the realized minimum gap consistently landed ~0.5 m below the nominal target,
+so `min_gap` defaults to 3.0 m (not the more natural-looking 2.0) specifically to keep the
+*realized* worst case comfortably positive — a value picked from measured erosion, not chosen to
+look right on paper. A genuinely robust fix (tightening the constraint by a confidence margin
+proportional to prediction uncertainty, i.e. robust/stochastic MPC) is future work, noted in
+Section 12.
+
+**Validation** (`validation/ngsim_loader.py`, `validation/acc_validation.py`) replays a real
+NGSIM leader/follower pair's recorded trajectory (US-101 freeway, congested traffic including a
+full stop, 78 seconds) through `LeadVehicleNode`, running *our* controller as the follower. Unlike
+the KITTI EKF validation (replaying real data through an unmodified estimator and comparing its
+output directly against ground truth), a controller's closed-loop behavior isn't directly
+comparable to what a human driver actually did — so this validates three different things
+instead: safety (gap never reaches zero, a hard pass/fail, same pattern as parking's
+`test_never_collides`), comfort (bounded jerk), and plausibility (our controller's resulting mean
+gap lands in a realistic range relative to the real follower's own recorded gap — a sanity check,
+not a strict target, since the real driver isn't assumed optimal).
+
+## 12. Highway-mode roadmap (H2-H4)
+
+- **H2 — Sensor fusion: extend the EKF with a speed state.** Add ego speed as a fourth estimated
+  state (`[x, y, theta, v]`) rather than treating it as a pure odometry input the way the parking
+  EKF does — fuse a noisy speedometer measurement the same way `update_heading`/`update_position`
+  already work. Directly motivated by H1/H3: both currently use *true* ego speed (Section 11
+  notes this explicitly as H1's scope boundary), and a fused, corrected estimate is what a real
+  system would actually have.
+- **H3 — Lane centering.** Stanley controller (`delta = heading_error + atan2(k *
+  cross_track_error, v)`) — the classical lane-keeping law, playing the same "geometric baseline"
+  role Pure Pursuit and IDM play elsewhere. Lane geometry derived from NGSIM's per-lane position
+  data (the same dataset validates both H1 and H3) rather than hand-authored. Brings the full 2D
+  `Vehicle` bicycle model back into the highway mode, combined with ACC for full longitudinal +
+  lateral highway driving.
+- **H4 — Intersection navigation.** Rule-based right-of-way state machine for a
+  stop-sign-controlled intersection, built on H1 + H3 rather than new control theory — mostly
+  reasoning wired on top of existing control. Validated against hand-authored scenarios (same
+  pattern as parking's obstacle scenarios) since real intersection datasets (INTERACTION, inD) are
+  registration-gated, like highD (noted below) — an optional upgrade, not a blocker.
+- **Robust/stochastic MPC for ACC**, closing the gap noted in Section 11: tighten the gap
+  constraint by a margin proportional to prediction uncertainty instead of a fixed empirically-
+  chosen `min_gap`, so the safety margin adapts to how much the lead vehicle's behavior is
+  actually deviating from the constant-velocity assumption.
+- **highD dataset upgrade for H3**: richer, pre-extracted lane geometry and maneuvers than NGSIM
+  provides, free for non-commercial use but registration-gated (a manual data-request form, no
+  anonymous download) — worth it once lane geometry precision actually matters, not required to
+  build H3 in the first place.

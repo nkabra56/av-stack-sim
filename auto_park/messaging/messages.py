@@ -80,3 +80,35 @@ class PathMsg:
 class ControlCmdMsg:
     v: float
     delta: float
+
+
+# --- Highway/ACC mode (H1) -- longitudinal-only, straight-line following. See
+# DESIGN.md's ACC section. LeadVehicleStateMsg/EgoLongitudinalStateMsg are the
+# highway-mode analogs of TrueStateMsg: ground truth, visible to RadarNode and the
+# harness's own evaluation logic, never to AccControllerNode directly.
+
+
+@dataclass(frozen=True)
+class LeadVehicleStateMsg:
+    position: float  # meters, along-road, ground truth
+    speed: float  # m/s
+
+
+@dataclass(frozen=True)
+class EgoLongitudinalStateMsg:
+    position: float  # meters, along-road, ground truth
+    speed: float  # m/s
+    accel: float  # m/s^2, last applied
+
+
+@dataclass(frozen=True)
+class RadarMsg:
+    """Noisy forward-radar reading: bumper-to-bumper range and closing range-rate."""
+
+    range: float  # meters
+    range_rate: float  # m/s, positive = closing (ego faster than lead)
+
+
+@dataclass(frozen=True)
+class LongitudinalCmdMsg:
+    accel: float  # m/s^2

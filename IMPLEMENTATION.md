@@ -1,10 +1,12 @@
 # Implementation Plan
 
-This is the build spec for the architecture described in [DESIGN.md](DESIGN.md). M1 (correct
-baseline), the control half of M3 (MPC), the state-estimation + pub/sub-architecture milestone
-(ME), and a real-data validation pass for the EKF (MV, below) are done; the sections below
-reflect what's actually in the repo today, not just what was planned. M2 (Hybrid A* + Reeds-Shepp
-obstacle routing) is the next milestone.
+This is the build spec for the architecture described in [DESIGN.md](DESIGN.md). Parking-mode
+milestones M1 (correct baseline), the control half of M3 (MPC), ME (state estimation + pub/sub
+architecture), and MV (real-data EKF validation against KITTI) are done. Highway-mode milestone
+**H1 (adaptive cruise control)** is also done, validated against real NGSIM data — the sections
+below reflect what's actually in the repo today, not just what was planned. Two things are next:
+parking's M2 (Hybrid A* + Reeds-Shepp obstacle routing) and highway's H2 (extend the EKF with a
+speed state) — see Section 3 for the full roadmap on both sides.
 
 ## 1. Directory structure
 
@@ -29,10 +31,16 @@ auto_park/
     kitti_loader.py       # parses KITTI poses.txt -> KittiSequence(times,x,y,theta,v,yaw_rate)
     kitti_ekf_validation.py  # runs the (unmodified) EKF against a real trajectory, EKF vs.
                        # dead-reckoning-only RMSE comparison + plot, see DESIGN.md section 5
+    ngsim_loader.py       # parses NGSIM CSV -> NgsimFollowingPair (leader + follower trajectories)
+    acc_validation.py      # runs ACC controllers vs. a real leader trajectory, safety/comfort/
+                       # plausibility metrics + plot, see DESIGN.md section 11
   data/
     kitti/
       excerpt_poses.txt      # committed 300-frame excerpt (KITTI seq 09, frames 840-1139)
       ATTRIBUTION.md       # license/citation for the redistributed KITTI excerpt
+    ngsim/
+      excerpt_trajectories.csv  # committed 780-frame (78s) real leader/follower pair, US-101
+      ATTRIBUTION.md       # license/citation for the redistributed NGSIM excerpt
   nodes/
     __init__.py
     vehicle_node.py       # ground truth + odometry publisher; owns accel/steering limits
@@ -40,7 +48,14 @@ auto_park/
     estimator_node.py      # wraps ekf.py, publishes pose_estimate
     planner_node.py       # wraps Planner, plans once off the first pose_estimate
     controller_node.py     # wraps Controller, one control_cmd per tick via explicit step()
-  harness.py            # tick-based executor: owns the Bus, builds all 5 nodes, drives them
+    lead_vehicle_node.py    # replays a real recorded lead-vehicle trajectory tick by tick
+    ego_longitudinal_node.py # 1D point-mass ego state for the longitudinal-only ACC mode
+    radar_node.py         # noisy bumper-to-bumper range + range-rate to the lead vehicle
+    acc_controller_node.py   # wraps an ACC controller, one accel command per tick
+  harness.py            # tick-based executor (parking mode): owns the Bus, builds all 5 nodes
+  highway_harness.py       # tick-based executor (ACC/H1 mode): owns the Bus, builds the 4
+                       # longitudinal nodes -- mirrors harness.py's structure, kept separate
+                       # rather than forcing a shared base class before H3 shows what's common
   planning/
     __init__.py
     dubins.py            # M1 baseline: curvature-feasible fixed path, no obstacle avoidance
@@ -50,6 +65,7 @@ auto_park/
     __init__.py
     pure_pursuit.py        # adaptive Pure Pursuit, acts on HasPose (a Vehicle or a pose estimate)
     mpc.py              # nonlinear MPC (direct shooting, SLSQP)
+    acc.py              # IDMController + MpcAccController (longitudinal, see DESIGN.md section 11)
   visualization/
     __init__.py
     animate.py            # true vs. estimated trajectory + covariance ellipse + planned path
@@ -66,6 +82,8 @@ tests/
   test_ekf.py
   test_kitti_ekf_validation.py  # EKF vs. dead-reckoning-only on the committed real KITTI excerpt
   test_simulation.py       # integration tests, harness-based, across scenarios x controllers x seeds
+  test_acc.py            # IDM/MPC-ACC unit + synthetic braking-lead scenario checks
+  test_acc_validation.py    # IDM/MPC-ACC vs. real NGSIM data: safety, plausibility, determinism
 pyproject.toml
 DESIGN.md
 IMPLEMENTATION.md
@@ -171,6 +189,17 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   noise defaults as `SensorNode`/`VehicleNode`. Result: 0.85 m RMSE with corrections vs. 4.97 m
   dead-reckoning-only on the excerpt — an 83% reduction — see DESIGN.md section 5,
   "Validation against real data."
+- **H1 — Adaptive cruise control: done.** First highway-mode milestone: `control/acc.py`
+  (`IDMController`, `MpcAccController`), a longitudinal-only node set (`lead_vehicle_node.py`,
+  `ego_longitudinal_node.py`, `radar_node.py`, `acc_controller_node.py`) and
+  `highway_harness.py`, validated against a real 78s NGSIM leader/follower trajectory
+  (`validation/ngsim_loader.py`, `acc_validation.py`). See DESIGN.md section 11 for the
+  controller comparison and two real findings from building it: IDM's raw formula needs an
+  explicit physical deceleration floor (caught by a standalone unit test before any node existed
+  to catch it later), and nominal MPC's hard gap constraint can still be violated in a
+  standstill-recovery edge case (fixed by picking `min_gap` from measured real-world erosion, not
+  from what looks right on paper). M2 (below) and H2 (DESIGN.md section 12) are next, in either
+  order — they're independent.
 - **M2 — Planning (next up)**: implement `reeds_shepp.py`, then `hybrid_astar.py` on top of it;
   replace the fixed Dubins path with Hybrid A* as the default planner, planning from the pose
   *estimate* (already how `PlannerNode` is wired — no further node changes needed). Validate
@@ -185,14 +214,11 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   trajectory, a covariance ellipse, and the planned path (landed as part of ME, since the whole
   point of adding an estimator is visible directly in that comparison). Still open: a genuinely
   multi-panel layout (live sensor readings, speed profile) alongside the top-down view.
-- **M6 — Tests & CI**: `test_vehicle.py`, `test_bus.py`, `test_ekf.py`,
-  `test_kitti_ekf_validation.py`, and `test_simulation.py` exist and run in ~11s (76 tests); no
-  GitHub Actions workflow yet.
+- **M6 — Tests & CI**: 87 tests across both modes run in ~22s; no GitHub Actions workflow yet.
 
 ## 4. Testing strategy
 
-Current (`tests/test_vehicle.py`, `test_bus.py`, `test_ekf.py`, `test_kitti_ekf_validation.py`,
-`test_simulation.py`, 76 tests, ~11s):
+Current (87 tests, ~22s):
 
 - Kinematic checks: driving straight for N steps moves `x` by `v*N*dt` with `theta` unchanged; a
   fixed steering angle over time traces a circle of radius `L / tan(delta)`; `turning_radius`
@@ -213,10 +239,18 @@ Current (`tests/test_vehicle.py`, `test_bus.py`, `test_ekf.py`, `test_kitti_ekf_
 - Regression guard for the original degrees/radians bug: every scenario's `theta` values must
   fall in `[-pi, pi]`; a value like the old `90.0` is ~14 full rotations out of range and would
   fail this immediately.
-- Real-data validation: on the committed KITTI excerpt, the EKF's RMSE must be strictly lower
-  than a dead-reckoning-only pass over the identical noisy odometry stream (the robust claim —
-  no arbitrary accuracy number to pick), stays under a generous absolute bound (divergence
-  guard), and is deterministic for a fixed seed.
+- Real-data validation (parking/EKF): on the committed KITTI excerpt, the EKF's RMSE must be
+  strictly lower than a dead-reckoning-only pass over the identical noisy odometry stream (the
+  robust claim — no arbitrary accuracy number to pick), stays under a generous absolute bound
+  (divergence guard), and is deterministic for a fixed seed.
+- ACC unit checks: IDM accelerates toward `v0` with room ahead; IDM's output is clipped to a
+  physical deceleration floor in a close/closing scenario (not the raw formula's unbounded
+  value); MPC-ACC's output stays within its own bounds; both controllers follow a synthetic
+  braking lead vehicle without the gap ever reaching zero.
+- Real-data validation (ACC): on the committed NGSIM excerpt, both controllers must never collide
+  (hard pass/fail, ground truth, same principle as parking's `test_never_collides`), land in a
+  plausible gap range relative to the real recorded follower (not a strict match), and produce a
+  deterministic result for a fixed seed.
 
 Planned, once `planning/` grows with M2 (currently integration-level coverage is enough, but
 won't scale to multiple planners):
@@ -239,10 +273,13 @@ matplotlib
 pyyaml       # scenario file loading
 pytest
 ```
-`scipy.optimize.minimize(method="SLSQP")` turned out sufficient for `control/mpc.py`; `cvxpy`
-was the planned fallback if that proved awkward, but wasn't needed. No new dependency was needed
-for the EKF/pub-sub milestone either — `Bus` is ~15 lines of pure Python, and the EKF is plain
-NumPy linear algebra.
+`scipy.optimize.minimize(method="SLSQP")` turned out sufficient for `control/mpc.py` (and, with
+the `constraints` argument, for `control/acc.py`'s MPC too); `cvxpy` was the planned fallback if
+that proved awkward, but wasn't needed either time. No new dependency was needed for the
+EKF/pub-sub milestone (`Bus` is ~15 lines of pure Python, the EKF is plain NumPy linear algebra),
+and `validation/ngsim_loader.py` deliberately uses the standard library `csv` module rather than
+pandas — a filter/sort over a few hundred rows doesn't need a dataframe library, and the project
+has stayed dependency-light on purpose every time so far.
 
 ```
 pip install -e .
@@ -252,6 +289,7 @@ python -m auto_park.demo <scenario> --controller mpc       # MPC instead
 python -m auto_park.demo <scenario> --seed 7               # override the scenario's RNG seed
 python -m auto_park.demo <scenario> --save out.gif         # save a GIF for the README
 python -m auto_park.validation.kitti_ekf_validation --plot out.png   # EKF vs. real KITTI data
+python -m auto_park.validation.acc_validation --controller mpc --plot out.png  # ACC vs. real NGSIM data
 ```
 
 ## 6. Known issues
@@ -351,3 +389,31 @@ Found during pre-merge review (a full-diff pass against `main` before merging, p
   wrap-to-`[-pi, pi]` formula already provided by `vehicle.wrap_angle` instead of importing it.
   Not a correctness bug (the duplicated formula was correct), but three copies of the same logic
   is three places a future change has to remember to touch. Both now import and use `wrap_angle`.
+
+Found while building H1 (adaptive cruise control):
+
+- `NgsimTrajectory` extraction initially grouped rows by `(vehicle_id, frame_id)` alone. NGSIM's
+  `vehicle_id` and `frame_id` both reset across the dataset's separate recording sub-periods, so
+  the same `(vehicle_id, frame_id)` pair can legitimately appear more than once, silently mixing
+  two different real vehicles' data into what looked like one trajectory (caught because the
+  resulting "trajectory" had more rows than the frame range should allow — an easy thing to miss
+  if you don't sanity-check row counts). Fixed by keying on `global_time`, NGSIM's one genuinely
+  monotonic, non-resetting timestamp, and verifying the extracted excerpt's consecutive timestamps
+  are all exactly 100ms apart before committing it.
+- `IDMController`'s raw formula returned -1309 m/s² for a plausible close-range, fast-closing
+  scenario in a standalone sanity check, run *before* the controller was wired into any node.
+  The model's `(s*/gap)^2` interaction term is mathematically unbounded as gap shrinks; nothing in
+  the textbook formula itself imposes a physical floor. Fixed by clipping to `a_min` (default -9
+  m/s², ~1g). Catching this via an isolated unit test rather than a failing integration test is
+  the point of testing controllers standalone before wiring them into a harness — same lesson as
+  M1's original Bezier-curve curvature bug, just one component earlier in the pipeline this time.
+- `MpcAccController`'s hard `gap(t) >= min_gap` constraint was violated in the closed-loop
+  simulation despite being enforced inside the optimizer — traced to a standstill-recovery
+  scenario (real NGSIM data includes a full stop) where, once the ego is already closer than
+  `min_gap` while both vehicles are stopped, no feasible acceleration sequence can satisfy the
+  constraint (moving apart from a standstill would require reversing, which the ego can't do).
+  SLSQP returns its best constraint-violating attempt rather than failing loudly in this case.
+  Measured the actual erosion (~0.5 m below the nominal target, fairly consistent across several
+  `min_gap` values tested) and set the default from that measurement (3.0 m) rather than picking
+  a value that merely looked sufficient on paper. See DESIGN.md section 11 for the full
+  explanation and section 12 for the proper long-term fix (robust/stochastic MPC).
