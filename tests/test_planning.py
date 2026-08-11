@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
 
-from auto_park.environment import VEHICLE_RADIUS
-from auto_park.planning.hybrid_astar import HybridAStarPlanner
-from auto_park.planning.reeds_shepp import ReedsSheppPlanner
-from auto_park.scenario_loader import list_scenarios, load_scenario
-from auto_park.vehicle import wrap_angle
+from core.environment import VEHICLE_RADIUS
+from core.planning.hybrid_astar import HybridAStarPlanner
+from core.planning.reeds_shepp import ReedsSheppPlanner
+from core.scenario_loader import list_scenarios, load_scenario
+from core.vehicle import wrap_angle
 
 PLANNERS = {
     "reeds_shepp": ReedsSheppPlanner(),

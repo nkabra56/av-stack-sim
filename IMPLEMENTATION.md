@@ -15,7 +15,7 @@ polish, CI) are what's next — see Section 3 for the full roadmap.
 ## 1. Directory structure
 
 ```
-auto_park/
+core/
   vehicle.py           # kinematic bicycle model + turning_radius from max_steer
   sensors.py            # ultrasonic ray-cast sensor array (used internally by SensorNode)
   environment.py         # parking lot, spots, obstacles, boundaries, VEHICLE_RADIUS (shared by
@@ -210,9 +210,9 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   obstacle-free scenarios (now evaluated as a 5-seed success rate rather than a single
   deterministic run — Section 4), and every scenario still never collides, across every seed.
 - **MV — Real-data EKF validation: done.** `test_ekf.py` only proves the filter is
-  self-consistent against noise the project generates for itself. `auto_park/validation/` adds an
+  self-consistent against noise the project generates for itself. `core/validation/` adds an
   independent check: the same, unmodified EKF replayed against real KITTI Odometry ground-truth
-  poses (a committed 300-frame excerpt with real turns, `auto_park/data/kitti/`), using the same
+  poses (a committed 300-frame excerpt with real turns, `core/data/kitti/`), using the same
   noise defaults as `SensorNode`/`VehicleNode`. Result: 0.85 m RMSE with corrections vs. 4.97 m
   dead-reckoning-only on the excerpt — an 83% reduction — see DESIGN.md section 5,
   "Validation against real data."
@@ -355,13 +355,13 @@ has stayed dependency-light on purpose every time so far.
 ```
 pip install -e .
 pytest                                                    # run the test suite
-python -m auto_park.demo <scenario>                       # Pure Pursuit, show the animation
-python -m auto_park.demo <scenario> --controller mpc       # MPC instead
-python -m auto_park.demo <scenario> --seed 7               # override the scenario's RNG seed
-python -m auto_park.demo <scenario> --save out.gif         # save a GIF for the README
-python -m auto_park.validation.kitti_ekf_validation --plot out.png   # EKF vs. real KITTI data
-python -m auto_park.validation.acc_validation --controller mpc --plot out.png  # ACC vs. real NGSIM data
-python -m auto_park.validation.lane_centering_validation --plot out.png  # Stanley vs. real NGSIM lane geometry
+python -m core.demo <scenario>                       # Pure Pursuit, show the animation
+python -m core.demo <scenario> --controller mpc       # MPC instead
+python -m core.demo <scenario> --seed 7               # override the scenario's RNG seed
+python -m core.demo <scenario> --save out.gif         # save a GIF for the README
+python -m core.validation.kitti_ekf_validation --plot out.png   # EKF vs. real KITTI data
+python -m core.validation.acc_validation --controller mpc --plot out.png  # ACC vs. real NGSIM data
+python -m core.validation.lane_centering_validation --plot out.png  # Stanley vs. real NGSIM lane geometry
 ```
 
 ## 6. Known issues

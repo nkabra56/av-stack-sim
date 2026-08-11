@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from auto_park.vehicle import Vehicle
+from core.vehicle import Vehicle
 
 
 def test_straight_line_motion():

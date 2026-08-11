@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
 
-from auto_park.control.mpc import MPCController
-from auto_park.control.pure_pursuit import PurePursuitAdaptive
-from auto_park.harness import ParkingHarness
-from auto_park.planning.hybrid_astar import HybridAStarPlanner, brake_distance_for
-from auto_park.scenario_loader import list_scenarios, load_scenario
+from core.control.mpc import MPCController
+from core.control.pure_pursuit import PurePursuitAdaptive
+from core.harness import ParkingHarness
+from core.planning.hybrid_astar import HybridAStarPlanner, brake_distance_for
+from core.scenario_loader import list_scenarios, load_scenario
 
 SEEDS = [1, 2, 3, 4, 5]
 MIN_SUCCESS_RATE = 4  # out of 5 -- noise can legitimately cause an occasional miss

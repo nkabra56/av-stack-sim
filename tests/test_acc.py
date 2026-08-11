@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from auto_park.control.acc import IDMController, MpcAccController
-from auto_park.highway_harness import AccHarness
+from core.control.acc import IDMController, MpcAccController
+from core.highway_harness import AccHarness
 
 
 def test_idm_accelerates_toward_desired_speed_with_no_lead_constraint():

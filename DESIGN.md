@@ -59,7 +59,7 @@ Two properties of this graph matter more than the fact that it's "pub/sub" at al
   a new planner or controller means writing a class that satisfies `Planner`/`Controller`
   (`interfaces.py`) and wrapping it in the corresponding node — nothing else in the graph changes.
 
-Dispatch (`auto_park/messaging/bus.py`) is **synchronous and immediate**: `publish()` calls every
+Dispatch (`core/messaging/bus.py`) is **synchronous and immediate**: `publish()` calls every
 subscriber callback directly, in registration order, no threads or async queue. A real ROS2 graph
 runs concurrently with nondeterministic message timing; this simulation trades that realism for
 determinism, because reproducible tests and reproducible demo GIFs matter more here than
@@ -135,7 +135,7 @@ what it corrects.
 ## 5. State estimation
 
 **The vehicle's controller and planner never see ground truth.** Everything they act on comes
-from an Extended Kalman Filter (`auto_park/estimation/ekf.py`) that fuses noisy odometry and
+from an Extended Kalman Filter (`core/estimation/ekf.py`) that fuses noisy odometry and
 three noisy sensor types into a `[x, y, theta]` pose estimate with covariance. This is the classic
 "odometry + periodic absolute correction" mobile-robot localization pattern (Thrun, Burgard & Fox,
 *Probabilistic Robotics*, ch. 7) — localization, not SLAM: obstacle/landmark positions are assumed
@@ -182,9 +182,9 @@ from the harder "kidnapped robot" global relocalization problem, which is out of
 
 `tests/test_ekf.py` only ever validates the filter against noise the project itself generates —
 that proves the *implementation* is self-consistent, but not that it behaves sensibly on a real,
-messy trajectory nobody hand-picked to be filter-friendly. `auto_park/validation/` closes that
+messy trajectory nobody hand-picked to be filter-friendly. `core/validation/` closes that
 gap: it replays a real driven trajectory from the **KITTI Odometry benchmark**'s ground-truth
-poses (`auto_park/data/kitti/excerpt_poses.txt` — 300 frames of sequence 09, chosen specifically
+poses (`core/data/kitti/excerpt_poses.txt` — 300 frames of sequence 09, chosen specifically
 for having real turns, not a straight highway stretch, so heading estimation is actually
 exercised) through the *same, unmodified* `ExtendedKalmanFilter`, using the *same* noise defaults
 as `SensorNode`/`VehicleNode`.
@@ -421,7 +421,7 @@ selectable per scenario via `demo.py --controller mpc`.
   turning rates, but it's an approximation, and demonstrating *why* it's usually good enough here
   — rather than just asserting it — would be a stronger claim than the current filter-consistency
   test alone provides).
-- ROS2 bridge: the node/topic boundaries in `auto_park/nodes/` and `auto_park/messaging/` were
+- ROS2 bridge: the node/topic boundaries in `core/nodes/` and `core/messaging/` were
   drawn deliberately close to how a real ROS2 graph would be structured, specifically so that
   swapping the in-process `Bus` for real ROS2 topics later wouldn't require redesigning the nodes
   themselves — only how they publish/subscribe.

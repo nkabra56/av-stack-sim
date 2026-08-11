@@ -85,18 +85,18 @@ pip install -e .
 pytest                                                     # run the test suite (~22s, 100 tests)
 
 # Parking
-python -m auto_park.demo perpendicular_open                # Pure Pursuit, show the animation
-python -m auto_park.demo perpendicular_open --controller mpc   # MPC instead
-python -m auto_park.demo perpendicular_open --seed 7             # different noise realization
-python -m auto_park.demo perpendicular_open --save out.gif      # save a GIF
-python -m auto_park.validation.kitti_ekf_validation --plot out.png   # EKF vs. real KITTI data
+python -m core.demo perpendicular_open                # Pure Pursuit, show the animation
+python -m core.demo perpendicular_open --controller mpc   # MPC instead
+python -m core.demo perpendicular_open --seed 7             # different noise realization
+python -m core.demo perpendicular_open --save out.gif      # save a GIF
+python -m core.validation.kitti_ekf_validation --plot out.png   # EKF vs. real KITTI data
 
 # Highway: adaptive cruise control
-python -m auto_park.validation.acc_validation --controller idm --plot out.png   # IDM vs. real NGSIM data
-python -m auto_park.validation.acc_validation --controller mpc --plot out.png   # MPC-ACC instead
+python -m core.validation.acc_validation --controller idm --plot out.png   # IDM vs. real NGSIM data
+python -m core.validation.acc_validation --controller mpc --plot out.png   # MPC-ACC instead
 
 # Highway: lane centering
-python -m auto_park.validation.lane_centering_validation --plot out.png   # Stanley vs. a real NGSIM lane
+python -m core.validation.lane_centering_validation --plot out.png   # Stanley vs. a real NGSIM lane
 ```
 
 Other parking scenarios: `perpendicular_flanked`, `perpendicular_obstructed_lane`,
@@ -105,7 +105,7 @@ Other parking scenarios: `perpendicular_flanked`, `perpendicular_obstructed_lane
 ## Project structure
 
 ```
-auto_park/
+core/
   vehicle.py           # kinematic bicycle model + turning_radius
   environment.py         # parking lot, spots, obstacles
   scenario_loader.py       # loads scenarios/*.yaml

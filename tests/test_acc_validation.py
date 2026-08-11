@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from auto_park.validation.acc_validation import validate
-from auto_park.validation.ngsim_loader import DEFAULT_EXCERPT_PATH
+from core.validation.acc_validation import validate
+from core.validation.ngsim_loader import DEFAULT_EXCERPT_PATH
 
 
 def test_excerpt_data_is_present():

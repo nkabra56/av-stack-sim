@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from auto_park.validation.kitti_ekf_validation import DEFAULT_POSES_PATH, validate
-from auto_park.validation.kitti_loader import load_kitti_poses
+from core.validation.kitti_ekf_validation import DEFAULT_POSES_PATH, validate
+from core.validation.kitti_loader import load_kitti_poses
 
 
 def test_excerpt_data_is_present():

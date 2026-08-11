@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from auto_park.validation.lane_centering_validation import REAL_LATERAL_STD_M, validate
-from auto_park.validation.ngsim_loader import DEFAULT_LANE_CENTERLINE_PATH
+from core.validation.lane_centering_validation import REAL_LATERAL_STD_M, validate
+from core.validation.ngsim_loader import DEFAULT_LANE_CENTERLINE_PATH
 
 
 def test_lane_centerline_data_is_present():

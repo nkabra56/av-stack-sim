@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from auto_park.estimation.ekf import ExtendedKalmanFilter
+from core.estimation.ekf import ExtendedKalmanFilter
 
 
 def _ekf(x0=(0.0, 0.0, 0.0), p0_scale=0.05, odom_v_std=0.03, odom_delta_std=0.01):

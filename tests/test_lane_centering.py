@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from auto_park.control.lane_centering import StanleyController
-from auto_park.vehicle import Vehicle
+from core.control.lane_centering import StanleyController
+from core.vehicle import Vehicle
 
 
 def test_converges_from_a_lateral_offset_on_a_straight_lane():

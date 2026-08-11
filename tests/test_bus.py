@@ -1,4 +1,4 @@
-from auto_park.messaging.bus import Bus
+from core.messaging.bus import Bus
 
 
 def test_publish_delivers_to_all_subscribers():
