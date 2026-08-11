@@ -1,5 +1,5 @@
 """Dubins path planner: the shortest curvature-constrained path for a forward-only
-car between two poses, given a fixed minimum turning radius. See DESIGN.md section 5.
+car between two poses, given a fixed minimum turning radius. See DESIGN.md section 6.
 
 This is the M1 baseline planner. It replaces an earlier fixed-Bezier-curve baseline
 that turned out to be kinematically infeasible near sharp heading changes -- a
@@ -30,6 +30,7 @@ import numpy as np
 
 from auto_park.environment import Obstacle
 from auto_park.interfaces import Pose
+from auto_park.vehicle import wrap_angle
 
 
 def _mod2pi(theta: float) -> float:
@@ -127,5 +128,5 @@ class DubinsPlanner:
             pose = tuple(pts[-1])
 
         path = np.vstack(segments)
-        path[:, 2] = (path[:, 2] + np.pi) % (2 * np.pi) - np.pi
+        path[:, 2] = wrap_angle(path[:, 2])
         return path

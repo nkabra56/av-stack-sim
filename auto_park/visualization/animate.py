@@ -1,4 +1,4 @@
-"""Matplotlib top-down animation of a parking run. See DESIGN.md section 2 (Visualization).
+"""Matplotlib top-down animation of a parking run.
 
 Shows the planned path (light gray), the true trajectory (solid blue, vehicle drawn at
 its true pose -- since that's what actually happened), the EKF's estimated trajectory
@@ -16,8 +16,8 @@ from matplotlib.patches import Circle, Ellipse, Rectangle
 from auto_park.environment import Environment
 from auto_park.harness import SimulationResult
 
-VEHICLE_LENGTH = 1.0
-VEHICLE_WIDTH = 0.6
+VEHICLE_LENGTH = 4.5  # matches the ~2.7m wheelbase + overhangs used everywhere else (Vehicle,
+VEHICLE_WIDTH = 1.8  # scenario spot dimensions) -- not an arbitrary small rendering size
 
 
 def _axis_bounds(result: SimulationResult, environment: Environment, pad: float = 1.0):
@@ -26,6 +26,12 @@ def _axis_bounds(result: SimulationResult, environment: Environment, pad: float 
     if len(result.true_history):
         xs += list(result.true_history[:, 0])
         ys += list(result.true_history[:, 1])
+    if result.path is not None and len(result.path):
+        # Otherwise the planned path can render outside the visible axes whenever the
+        # vehicle stalls well short of the goal (exactly the scenarios meant to show the
+        # gap between the planned path and what actually happened -- see DESIGN.md section 6).
+        xs += list(result.path[:, 0])
+        ys += list(result.path[:, 1])
     for obstacle in environment.obstacles:
         xs += [obstacle.x - obstacle.radius, obstacle.x + obstacle.radius]
         ys += [obstacle.y - obstacle.radius, obstacle.y + obstacle.radius]

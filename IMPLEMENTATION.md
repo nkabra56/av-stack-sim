@@ -282,7 +282,7 @@ Resolved during M1:
   distance at `v_max`/`a_max` (~1.4 m). The sensor detected obstacles in time, but the vehicle
   couldn't decelerate fast enough within the remaining gap — real collisions in scenarios that
   should have stalled safely. Fixed by sizing `brake_distance` from the stopping-distance formula
-  plus margin (see DESIGN.md section 7).
+  plus margin (see DESIGN.md section 8).
 - No obstacle-avoidance routing exists yet — the planner brakes to a stop when the sensor detects
   something close, it never routes around what it detects. This is by design for M1 (see DESIGN.md
   section 6) and is what M2 (Hybrid A*) resolves.
@@ -317,3 +317,37 @@ Found during the real-data validation milestone (MV):
   the extracted heading has to track the actual direction of travel between consecutive frames on
   a sequence with real turns, which it does (mean deviation ~0.12 rad, consistent with real
   vehicle slip/differencing noise) — not just "the code runs without an exception."
+
+Found during pre-merge review (a full-diff pass against `main` before merging, plus a broader
+200-run collision sweep across seeds beyond what the test suite covers):
+
+- `VEHICLE_RADIUS` (the ego vehicle's own collision-circle radius, `harness.py`) was 0.3 m —
+  roughly four times smaller than the ~1.3 m used for parked-car obstacles in every scenario,
+  even though the ego vehicle is a comparably-sized real car. This doesn't fail loudly: it just
+  makes `_collided()` under-report real collisions, silently passing safety checks it shouldn't.
+  Fixed to 1.0 m, consistent with the obstacle scale (see DESIGN.md section 8).
+- Fixing `VEHICLE_RADIUS` alone then broke `test_never_collides` on several obstacle scenarios:
+  `brake_distance` (3.0 m as of this fix, was 2.0) has to cover stopping distance **plus the
+  vehicle's own radius**, not stopping distance alone, since the sensor reading it's compared
+  against measures to the obstacle's surface but collision is checked between the two circles'
+  *centers*. The two fixes are coupled — sizing one constant realistically changes what the other
+  needs to be (see DESIGN.md section 8). Re-verified with a 200-run sweep (20 seeds x 5 scenarios
+  x 2 controllers), zero collisions.
+- `visualization/animate.py`'s axis bounds were computed from true trajectory + obstacles + spot
+  only, never from the *planned* path. For the three scenarios specifically designed to show a
+  plan driving toward an obstacle before the vehicle safely stalls, the planned path extends well
+  past where the truncated true trajectory does — so the gray "planned" line could render outside
+  the visible axes in exactly the demos meant to showcase it. Fixed by including `result.path` in
+  the bounds calculation. (Also fixed while in this file: the rendered vehicle rectangle was
+  1.0m x 0.6m, comically small for a 2.7m-wheelbase car — bumped to 4.5m x 1.8m.)
+- `MPCController` has its own internal rollout `dt` (default 0.1), independent of
+  `ParkingHarness`'s `dt` (also default 0.1) — nothing wired them together. Both defaults happen
+  to match today, so this wasn't causing an active failure, but it's a silent-desync footgun: a
+  future `ParkingHarness(..., dt=0.05)` would leave the MPC predicting against the wrong step
+  size with no error. Fixed by having `ParkingHarness.__init__` set `controller.dt = dt`
+  whenever the controller has one, so the harness's `dt` is the single source of truth rather
+  than something every caller has to remember to keep in sync by hand.
+- `planning/dubins.py` and `validation/kitti_loader.py` each reimplemented the same
+  wrap-to-`[-pi, pi]` formula already provided by `vehicle.wrap_angle` instead of importing it.
+  Not a correctness bug (the duplicated formula was correct), but three copies of the same logic
+  is three places a future change has to remember to touch. Both now import and use `wrap_angle`.

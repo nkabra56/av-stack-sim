@@ -20,6 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
+from auto_park.vehicle import wrap_angle
+
 NOMINAL_DT = 0.1
 
 
@@ -57,8 +59,7 @@ def load_kitti_poses(path: str | Path, dt: float = NOMINAL_DT) -> KittiSequence:
     dx = np.diff(x)
     dy = np.diff(y)
     v = np.hypot(dx, dy) / dt
-    dtheta = np.diff(theta)
-    dtheta = (dtheta + np.pi) % (2 * np.pi) - np.pi
+    dtheta = wrap_angle(np.diff(theta))
     yaw_rate = dtheta / dt
 
     return KittiSequence(times=times, x=x, y=y, theta=theta, v=v, yaw_rate=yaw_rate)

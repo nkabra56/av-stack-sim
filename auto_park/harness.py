@@ -29,7 +29,10 @@ from auto_park.nodes.vehicle_node import VehicleNode
 from auto_park.sensors import UltrasonicArray
 from auto_park.vehicle import Vehicle
 
-VEHICLE_RADIUS = 0.3
+VEHICLE_RADIUS = 1.0  # ego vehicle's own collision-circle radius; must be on the same scale as
+# the ~1.3m obstacle radii used for parked cars in scenarios/*.yaml (see DESIGN.md section 8),
+# not an arbitrary small buffer -- a real car is comparable in size to the cars it's driving
+# among, so its own collision footprint has to be too, or _collided() under-reports real hits.
 DEFAULT_SENSOR_ANGLES = [-0.6, -0.3, 0.0, 0.3, 0.6]
 
 
@@ -59,7 +62,11 @@ class ParkingHarness:
         tol: float = 0.4,  # looser than the pre-estimation baseline (0.3): the vehicle now
         # only ever knows its NOISY pose estimate, not ground truth, so "close enough to
         # call it parked" has to allow for realistic estimation error, not just controller error
-        brake_distance: float = 2.0,
+        # >= v_max^2/(2*a_max) stopping distance (~1.41m) + VEHICLE_RADIUS (the vehicle brakes
+        # based on a sensor reading to the obstacle SURFACE, but collision is checked between
+        # vehicle CENTER and obstacle center, so the vehicle's own radius has to be part of the
+        # margin too, not just its stopping distance) + a safety margin.
+        brake_distance: float = 3.0,
     ):
         self.environment = environment
         self.tol = tol
@@ -85,6 +92,13 @@ class ParkingHarness:
         self.estimator_node = EstimatorNode(self.bus, ekf, environment)
         self.planner_node = PlannerNode(self.bus, planner, environment, vehicle.turning_radius)
         self.controller_node = ControllerNode(self.bus, controller, brake_distance=brake_distance)
+
+        # A controller with its own internal rollout model (e.g. MPCController) has to predict
+        # forward using the *actual* tick length, or its predictions silently desync from the
+        # real simulation step -- the harness's dt is the single source of truth, not whatever
+        # default the controller happened to be constructed with.
+        if hasattr(controller, "dt"):
+            controller.dt = dt
 
         self._latest_true: TrueStateMsg | None = None
         self._latest_est: PoseEstimateMsg | None = None

@@ -1,4 +1,4 @@
-"""Short-horizon nonlinear MPC path tracker. See DESIGN.md section 6.
+"""Short-horizon nonlinear MPC path tracker. See DESIGN.md section 7.
 
 Each call optimizes a control sequence (v_k, delta_k) for k=0..horizon-1 by rolling
 out the (nonlinear) kinematic bicycle model and minimizing tracking error against a

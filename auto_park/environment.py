@@ -1,11 +1,11 @@
-"""Parking lot geometry: spots and obstacles. See DESIGN.md section 1/7."""
+"""Parking lot geometry: spots and obstacles. See DESIGN.md section 1/8."""
 
 from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
 class Obstacle:
-    """A circular obstacle (bounding-circle approximation, see DESIGN.md section 7)."""
+    """A circular obstacle (bounding-circle approximation, see DESIGN.md section 8)."""
 
     x: float
     y: float

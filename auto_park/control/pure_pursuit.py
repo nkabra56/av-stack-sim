@@ -1,5 +1,5 @@
 """Geometric Pure Pursuit path tracker, with automatic forward/reverse selection.
-See DESIGN.md section 6.
+See DESIGN.md section 7.
 """
 
 import numpy as np

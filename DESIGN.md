@@ -92,7 +92,7 @@ unit mismatch this model is sensitive to, since `theta'` compounds every step).
 
 `Vehicle` also carries `max_steer` (default 0.6 rad, ~34 degrees — a realistic passenger-car
 limit) and exposes `turning_radius = wheelbase / tan(max_steer)`. This is the single source of
-truth the planner and both controllers size themselves against — see Section 5 for why treating
+truth the planner and both controllers size themselves against — see Section 6 for why treating
 it as a real physical constraint, rather than an afterthought, turned out to matter a lot more
 than expected.
 
@@ -141,8 +141,9 @@ fixed, arbitrarily-sized `Q`: `Q = V @ M @ Vᵀ`, where `M` is the odometry nois
 `V = df/d(v, delta)` is the motion model's Jacobian with respect to its *inputs*. This ties how
 fast uncertainty grows during prediction directly to how noisy the odometry actually is, instead
 of guessing a growth rate independently of the sensor supposedly driving it — the difference
-matters: an arbitrary fixed `Q` would grow (or shrink) the ellipse in Section "Visualization"
-without any real connection to the odometry noise parameters it's sitting next to in the config.
+matters: an arbitrary fixed `Q` would grow (or shrink) the covariance ellipse drawn in the demo
+animation (`visualization/animate.py`) without any real connection to the odometry noise
+parameters it's sitting next to in the config.
 
 **Correct**, three independent measurement types, each with a linear or linearized `H`:
 
@@ -301,12 +302,20 @@ selectable per scenario via `demo.py --controller mpc`.
   than a hardcoded constant, since the right value is scenario-dependent.
 - **Obstacles as circles, not polygons**: keeps the sensor/planner collision math analytic
   (closed-form ray/circle and pose/circle checks) instead of requiring a general polygon
-  collision library; sufficient for representing parked cars/pillars as bounding circles.
-- **Brake-trigger distance sized from stopping physics, not picked by feel**: `brake_distance`
-  must exceed the vehicle's actual stopping distance (`v_max^2 / (2*a_max)`, ~1.4 m at this
-  project's speeds/accel limits) plus margin, or the vehicle detects an obstacle in time but
-  still can't decelerate fast enough to avoid it. An earlier, arbitrarily-chosen smaller value
-  produced exactly that: real collisions in scenarios the vehicle should have safely stalled in.
+  collision library; sufficient for representing parked cars/pillars as bounding circles. The
+  ego vehicle's own collision footprint (`VEHICLE_RADIUS` in `harness.py`) is modeled the same
+  way and has to be on the same scale as the obstacles it shares the lot with (1.0 m, vs. ~1.3 m
+  for a parked car) — an earlier, much smaller placeholder value (0.3 m) made the vehicle roughly
+  four times "thinner" than the cars around it for collision purposes, which under-reports real
+  collisions rather than causing loud failures, exactly the kind of bug that's easy to miss.
+- **Brake-trigger distance sized from stopping physics *and* the vehicle's own size, not picked
+  by feel**: `brake_distance` must exceed stopping distance (`v_max^2 / (2*a_max)`, ~1.4 m at
+  this project's speeds/accel limits) **plus `VEHICLE_RADIUS`**, plus margin — not stopping
+  distance alone. The sensor reading it's compared against measures from the vehicle's center to
+  the obstacle's *surface*, but collision is checked center-to-center against `VEHICLE_RADIUS +
+  obstacle.radius`, so the vehicle's own radius is part of the required margin, not just how
+  fast it can stop. Missing that term (an earlier version did) produces the same failure mode
+  either way: the vehicle detects the obstacle in time but still can't stop clear of it.
 
 ## 9. Known limitations & assumptions
 
