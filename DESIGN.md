@@ -168,6 +168,37 @@ Initial pose is assumed roughly known (`x0` = true start pose, with a modest ini
 not zero) — a common simplifying assumption that distinguishes ordinary localization/tracking
 from the harder "kidnapped robot" global relocalization problem, which is out of scope here.
 
+### Validation against real data
+
+`tests/test_ekf.py` only ever validates the filter against noise the project itself generates —
+that proves the *implementation* is self-consistent, but not that it behaves sensibly on a real,
+messy trajectory nobody hand-picked to be filter-friendly. `auto_park/validation/` closes that
+gap: it replays a real driven trajectory from the **KITTI Odometry benchmark**'s ground-truth
+poses (`auto_park/data/kitti/excerpt_poses.txt` — 300 frames of sequence 09, chosen specifically
+for having real turns, not a straight highway stretch, so heading estimation is actually
+exercised) through the *same, unmodified* `ExtendedKalmanFilter`, using the *same* noise defaults
+as `SensorNode`/`VehicleNode`.
+
+KITTI records no steering angle, only speed and yaw rate, so each step's true `(v, yaw_rate)` is
+converted to the `(v, delta)` the bicycle-model `predict()` expects via
+`delta = atan2(wheelbase * yaw_rate, v)` — a pure adapter, not a second process model; the EKF
+class itself needed zero changes. Frame-to-frame timing isn't included in the poses-only
+download, so frames are assumed uniformly spaced at the Velodyne's nominal 10 Hz — an
+approximation, stated as one rather than silently assumed. Ground-plane position and heading are
+extracted from KITTI's row-major `[R|t]` camera-frame pose matrices using camera **x**/**z** as
+the ground plane and rotation about camera **y** as heading — verified empirically (not just
+derived on paper) by checking that the extracted heading tracks the actual direction of travel
+between consecutive frames on a real turning sequence (mean deviation ~0.12 rad, consistent with
+real vehicle slip and finite-difference noise, not a convention bug).
+
+The validation runs two passes over the *identical* noisy odometry stream — the EKF (predict +
+corrections) and dead-reckoning-only (predict only, no corrections) — so the comparison isolates
+exactly what the corrections buy you. On the committed excerpt: **0.85 m RMSE with corrections
+vs. 4.97 m without — an 83% error reduction**, on a real trajectory the filter was never tuned
+against. `tests/test_kitti_ekf_validation.py` asserts the EKF strictly beats dead-reckoning-only
+(the robust claim — no arbitrary accuracy threshold to pick) rather than asserting a specific
+RMSE number, since the exact figure is a property of this one excerpt, not a guarantee.
+
 ## 6. Path planning
 
 ### What's built now: Dubins paths

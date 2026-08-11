@@ -1,10 +1,10 @@
 # Implementation Plan
 
 This is the build spec for the architecture described in [DESIGN.md](DESIGN.md). M1 (correct
-baseline), the control half of M3 (MPC), and the new state-estimation + pub/sub-architecture
-milestone (call it ME, below) are done; the sections below reflect what's actually in the repo
-today, not just what was planned. M2 (Hybrid A* + Reeds-Shepp obstacle routing) is the next
-milestone.
+baseline), the control half of M3 (MPC), the state-estimation + pub/sub-architecture milestone
+(ME), and a real-data validation pass for the EKF (MV, below) are done; the sections below
+reflect what's actually in the repo today, not just what was planned. M2 (Hybrid A* + Reeds-Shepp
+obstacle routing) is the next milestone.
 
 ## 1. Directory structure
 
@@ -24,6 +24,15 @@ auto_park/
   estimation/
     __init__.py
     ekf.py             # ExtendedKalmanFilter: predict + 3 correction types, see DESIGN.md section 5
+  validation/
+    __init__.py
+    kitti_loader.py       # parses KITTI poses.txt -> KittiSequence(times,x,y,theta,v,yaw_rate)
+    kitti_ekf_validation.py  # runs the (unmodified) EKF against a real trajectory, EKF vs.
+                       # dead-reckoning-only RMSE comparison + plot, see DESIGN.md section 5
+  data/
+    kitti/
+      excerpt_poses.txt      # committed 300-frame excerpt (KITTI seq 09, frames 840-1139)
+      ATTRIBUTION.md       # license/citation for the redistributed KITTI excerpt
   nodes/
     __init__.py
     vehicle_node.py       # ground truth + odometry publisher; owns accel/steering limits
@@ -55,6 +64,7 @@ tests/
   test_vehicle.py
   test_bus.py
   test_ekf.py
+  test_kitti_ekf_validation.py  # EKF vs. dead-reckoning-only on the committed real KITTI excerpt
   test_simulation.py       # integration tests, harness-based, across scenarios x controllers x seeds
 pyproject.toml
 DESIGN.md
@@ -154,6 +164,13 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   architecture. Net effect on outcomes: both controllers still succeed reliably on the two
   obstacle-free scenarios (now evaluated as a 5-seed success rate rather than a single
   deterministic run — Section 4), and every scenario still never collides, across every seed.
+- **MV — Real-data EKF validation: done.** `test_ekf.py` only proves the filter is
+  self-consistent against noise the project generates for itself. `auto_park/validation/` adds an
+  independent check: the same, unmodified EKF replayed against real KITTI Odometry ground-truth
+  poses (a committed 300-frame excerpt with real turns, `auto_park/data/kitti/`), using the same
+  noise defaults as `SensorNode`/`VehicleNode`. Result: 0.85 m RMSE with corrections vs. 4.97 m
+  dead-reckoning-only on the excerpt — an 83% reduction — see DESIGN.md section 5,
+  "Validation against real data."
 - **M2 — Planning (next up)**: implement `reeds_shepp.py`, then `hybrid_astar.py` on top of it;
   replace the fixed Dubins path with Hybrid A* as the default planner, planning from the pose
   *estimate* (already how `PlannerNode` is wired — no further node changes needed). Validate
@@ -168,12 +185,14 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   trajectory, a covariance ellipse, and the planned path (landed as part of ME, since the whole
   point of adding an estimator is visible directly in that comparison). Still open: a genuinely
   multi-panel layout (live sensor readings, speed profile) alongside the top-down view.
-- **M6 — Tests & CI**: `test_vehicle.py`, `test_bus.py`, `test_ekf.py`, and `test_simulation.py`
-  exist and run in ~10s (72 tests); no GitHub Actions workflow yet.
+- **M6 — Tests & CI**: `test_vehicle.py`, `test_bus.py`, `test_ekf.py`,
+  `test_kitti_ekf_validation.py`, and `test_simulation.py` exist and run in ~11s (76 tests); no
+  GitHub Actions workflow yet.
 
 ## 4. Testing strategy
 
-Current (`tests/test_vehicle.py`, `test_bus.py`, `test_ekf.py`, `test_simulation.py`, 72 tests, ~10s):
+Current (`tests/test_vehicle.py`, `test_bus.py`, `test_ekf.py`, `test_kitti_ekf_validation.py`,
+`test_simulation.py`, 76 tests, ~11s):
 
 - Kinematic checks: driving straight for N steps moves `x` by `v*N*dt` with `theta` unchanged; a
   fixed steering angle over time traces a circle of radius `L / tan(delta)`; `turning_radius`
@@ -194,6 +213,10 @@ Current (`tests/test_vehicle.py`, `test_bus.py`, `test_ekf.py`, `test_simulation
 - Regression guard for the original degrees/radians bug: every scenario's `theta` values must
   fall in `[-pi, pi]`; a value like the old `90.0` is ~14 full rotations out of range and would
   fail this immediately.
+- Real-data validation: on the committed KITTI excerpt, the EKF's RMSE must be strictly lower
+  than a dead-reckoning-only pass over the identical noisy odometry stream (the robust claim —
+  no arbitrary accuracy number to pick), stays under a generous absolute bound (divergence
+  guard), and is deterministic for a fixed seed.
 
 Planned, once `planning/` grows with M2 (currently integration-level coverage is enough, but
 won't scale to multiple planners):
@@ -228,6 +251,7 @@ python -m auto_park.demo <scenario>                       # Pure Pursuit, show t
 python -m auto_park.demo <scenario> --controller mpc       # MPC instead
 python -m auto_park.demo <scenario> --seed 7               # override the scenario's RNG seed
 python -m auto_park.demo <scenario> --save out.gif         # save a GIF for the README
+python -m auto_park.validation.kitti_ekf_validation --plot out.png   # EKF vs. real KITTI data
 ```
 
 ## 6. Known issues
@@ -281,3 +305,15 @@ Found and fixed during the state-estimation/pub-sub milestone (ME):
   `r_landmark`) are hand-picked plausible defaults (see `harness.py`'s `ParkingHarness.__init__`),
   not fit to any real sensor datasheet — reasonable for a simulation whose sensors are themselves
   synthetic, but worth stating explicitly rather than implying they're calibrated to something.
+
+Found during the real-data validation milestone (MV):
+
+- KITTI's poses-only download doesn't bundle per-frame timestamps, and its ground-plane axis
+  convention isn't the obvious "position x/y" you'd assume without checking — the ground plane is
+  camera **x**/**z** (not x/y) and heading is rotation about camera **y**, a direct consequence of
+  KITTI's camera-frame convention (x-right, y-down, z-forward). Getting this wrong wouldn't have
+  crashed anything — `kitti_loader.py` would have silently produced a plausible-looking but
+  physically wrong trajectory. Caught by an explicit empirical check before trusting the loader:
+  the extracted heading has to track the actual direction of travel between consecutive frames on
+  a sequence with real turns, which it does (mean deviation ~0.12 rad, consistent with real
+  vehicle slip/differencing noise) — not just "the code runs without an exception."

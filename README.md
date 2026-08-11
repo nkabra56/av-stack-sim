@@ -40,9 +40,14 @@ visualizations of true vs. estimated trajectory.
   success is asserted as a rate across 5 fixed seeds, not a single deterministic run — and safety
   (no collision) is asserted on every scenario × controller × seed combination, always against
   ground truth, never against the filter's own (possibly optimistic) estimate of itself.
+- **Validated against real driving data, not just synthetic noise**: the same, unmodified EKF
+  replayed against a real trajectory from the **KITTI Odometry benchmark** (a committed 300-frame
+  excerpt with genuine turns) — **0.85 m RMSE with corrections vs. 4.97 m dead-reckoning-only, an
+  83% reduction**, against ground truth nobody hand-picked to be filter-friendly. Details in
+  [DESIGN.md](DESIGN.md#validation-against-real-data).
 - A tested, modular codebase — planners, controllers, and nodes are swappable behind common
   interfaces (see [IMPLEMENTATION.md](IMPLEMENTATION.md#2-key-interfaces)), not a single
-  hardcoded pipeline. 72 tests, ~10s.
+  hardcoded pipeline. 76 tests, ~11s.
 - Scenarios that are honest about the current planner's limits: two scenarios have a clear path
   and both controllers reach the spot reliably; three place an obstacle where the fixed Dubins
   path can't route around it, and are asserted safe (no collision) rather than pretending the
@@ -60,11 +65,12 @@ Python, NumPy, SciPy, Matplotlib, PyYAML, pytest.
 
 ```bash
 pip install -e .
-pytest                                                     # run the test suite (~10s, 72 tests)
+pytest                                                     # run the test suite (~11s, 76 tests)
 python -m auto_park.demo perpendicular_open                # Pure Pursuit, show the animation
 python -m auto_park.demo perpendicular_open --controller mpc   # MPC instead
 python -m auto_park.demo perpendicular_open --seed 7             # different noise realization
 python -m auto_park.demo perpendicular_open --save out.gif      # save a GIF
+python -m auto_park.validation.kitti_ekf_validation --plot out.png   # EKF vs. real KITTI data
 ```
 
 Other scenarios: `perpendicular_flanked`, `perpendicular_obstructed_lane`, `parallel_open`,
@@ -79,6 +85,8 @@ auto_park/
   scenario_loader.py       # loads scenarios/*.yaml
   messaging/             # Bus + typed messages (pub/sub backbone)
   estimation/            # EKF (odometry + compass + position-fix + landmark fusion)
+  validation/            # EKF validated against real KITTI Odometry ground truth
+  data/kitti/             # committed KITTI excerpt used by validation/ and its tests
   nodes/               # VehicleNode, SensorNode, EstimatorNode, PlannerNode, ControllerNode
   harness.py            # tick-based executor tying the node graph together
   planning/             # dubins.py (built); reeds_shepp.py, hybrid_astar.py (next)
@@ -96,9 +104,10 @@ each file is responsible for.
 M1 (correct baseline: Dubins planner, both controllers, realistic scenarios, tests) and M3 (MPC)
 are done. State estimation + the pub/sub node architecture (EKF, `messaging/`, `nodes/`,
 `harness.py`) are also done, replacing what used to be a direct-call simulation loop over
-ground-truth pose. M2 (Hybrid A* + Reeds-Shepp obstacle routing) is next — see the milestone list
-in [IMPLEMENTATION.md](IMPLEMENTATION.md#3-milestones) for full progress and the known-issues log
-of what was actually broken and fixed along the way.
+ground-truth pose — and validated against real KITTI Odometry data, not just synthetic noise.
+M2 (Hybrid A* + Reeds-Shepp obstacle routing) is next — see the milestone list in
+[IMPLEMENTATION.md](IMPLEMENTATION.md#3-milestones) for full progress and the known-issues log of
+what was actually broken and fixed along the way.
 
 ## License
 
