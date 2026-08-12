@@ -4,7 +4,7 @@ import pytest
 from core.control.mpc import MPCController
 from core.control.pure_pursuit import PurePursuitAdaptive
 from core.harness import ParkingHarness
-from core.planning.hybrid_astar import HybridAStarPlanner, brake_distance_for
+from core.planning.hybrid_astar import HybridAStarPlanner
 from core.scenario_loader import list_scenarios, load_scenario
 
 SEEDS = [1, 2, 3, 4, 5]
@@ -19,30 +19,30 @@ CONTROLLERS = {
 }
 
 # Pure Pursuit's already-documented "no margin when curvature is already at the
-# vehicle's limit" weakness (DESIGN.md section 7) is a measured, consistent safety
-# failure -- not noise-dependent flakiness -- on parallel_between_cars specifically:
-# Hybrid A*'s avoidance route there requires a tight reverse-gear cusp with obstacles
-# close enough that Pure Pursuit's reactive tracking error alone (not sensor-braking
-# blind spots, not planner infeasibility -- the planned path itself keeps a verified
-# 1.15m clearance floor) exceeds that margin. Measured across seeds 1-5: 5/5
-# collisions, every time, regardless of brake_distance or the planner's safety_margin
-# (a wider margin just traded the collision for Pure Pursuit never converging at all,
-# not for success -- see IMPLEMENTATION.md's M2 entry). MPC's constraint-respecting
-# rollout stays collision-free and converges reliably (5/5, up to ~880 steps). This is
-# the same class of finding DESIGN.md section 7 already predicts in the abstract,
-# now concretely realized once a planner actually produces curvature-saturated,
-# obstacle-hugging paths for Pure Pursuit to track.
-UNSAFE_COMBINATIONS = {("parallel_between_cars", "pure_pursuit")}
+# vehicle's limit" weakness (DESIGN.md section 7) is a measured, consistent finding on
+# parallel_between_cars specifically: Hybrid A*'s avoidance route there requires a
+# tight reverse-gear cusp with obstacles close enough that Pure Pursuit's reactive
+# tracking error alone (not sensor-braking blind spots, not planner infeasibility --
+# the planned path itself keeps a verified 1.15m clearance floor) saturates the
+# vehicle's steering with zero margin to correct. ControllerNode's speed governor
+# (see controller_node.py's docstring, KNOWN_BUGS.md bug 1) now brings the vehicle to
+# a safe stop before contact instead of colliding -- 0/5 collisions across seeds 1-5,
+# down from a previously-measured 5/5 -- but it still can't complete the maneuver
+# (0/5 success): once curvature is saturated, there's no achievable steering command
+# that both avoids the obstacle and keeps converging, so the governor's only remaining
+# option is to stop, not to route around it. MPC's constraint-respecting rollout has
+# never needed the governor here -- it stays collision-free and converges reliably on
+# its own (5/5, up to ~880 steps). This is the same class of finding DESIGN.md section
+# 7 already predicts in the abstract, now concretely realized once a planner actually
+# produces curvature-saturated, obstacle-hugging paths for Pure Pursuit to track.
+NEVER_SUCCEEDS = {("parallel_between_cars", "pure_pursuit")}
 
 
 def _run(scenario_name: str, controller_name: str, seed: int, max_steps: int = MAX_STEPS):
     scenario = load_scenario(scenario_name)
     planner = HybridAStarPlanner()
     controller = CONTROLLERS[controller_name](scenario.vehicle)
-    harness = ParkingHarness(
-        scenario.vehicle, scenario.environment, planner, controller, seed=seed,
-        brake_distance=brake_distance_for(planner),
-    )
+    harness = ParkingHarness(scenario.vehicle, scenario.environment, planner, controller, seed=seed)
     return harness.run(max_steps=max_steps)
 
 
@@ -55,7 +55,7 @@ def _combinations(exclude: set[tuple[str, str]]) -> list[tuple[str, str]]:
     ]
 
 
-@pytest.mark.parametrize("scenario_name,controller_name", _combinations(exclude=UNSAFE_COMBINATIONS))
+@pytest.mark.parametrize("scenario_name,controller_name", _combinations(exclude=NEVER_SUCCEEDS))
 def test_reaches_the_spot_across_seeds(scenario_name, controller_name):
     """Evaluated statistically, not as single-run determinism: with sensor/odometry
     noise in the loop, an occasional miss is expected behavior, not a bug. Hybrid A*
@@ -66,25 +66,28 @@ def test_reaches_the_spot_across_seeds(scenario_name, controller_name):
     assert successes >= MIN_SUCCESS_RATE
 
 
-@pytest.mark.parametrize("scenario_name,controller_name", _combinations(exclude=UNSAFE_COMBINATIONS))
+@pytest.mark.parametrize("scenario_name,controller_name", _combinations(exclude=set()))
 @pytest.mark.parametrize("seed", SEEDS)
 def test_never_collides(scenario_name, controller_name, seed):
     """Safety must hold regardless of estimation noise, on every seed, for every
-    (scenario, controller) combination Hybrid A*'s own planned clearance actually
-    supports -- see UNSAFE_COMBINATIONS above for the one documented, measured
-    exception (not a flaky test, a real controller limitation)."""
+    (scenario, controller) combination -- including parallel_between_cars/pure_pursuit,
+    which used to be excluded here as a documented exception (see NEVER_SUCCEEDS and
+    KNOWN_BUGS.md bug 1): ControllerNode's speed governor now makes it fail safe
+    (stops short) instead of failing dangerously (collides)."""
     result = _run(scenario_name, controller_name, seed)
     assert not result.collision
 
 
 @pytest.mark.parametrize("seed", SEEDS)
-def test_parallel_between_cars_pure_pursuit_is_the_documented_unsafe_case(seed):
-    """Pins down UNSAFE_COMBINATIONS's claim as an actual regression guard, not just a
-    comment: if a future planner/controller change makes this combination safe, this
-    test should start failing (a good thing -- narrow UNSAFE_COMBINATIONS back down
-    when it does) rather than the exclusion silently going stale."""
+def test_parallel_between_cars_pure_pursuit_fails_safe_not_success(seed):
+    """Pins down NEVER_SUCCEEDS's claim as an actual regression guard, not just a
+    comment: if a future planner/controller change makes this combination succeed,
+    this test should start failing (a good thing -- narrow NEVER_SUCCEEDS back down
+    when it does) rather than the exclusion silently going stale. Collision safety
+    itself is already covered unconditionally by test_never_collides above."""
     result = _run("parallel_between_cars", "pure_pursuit", seed)
-    assert result.collision
+    assert not result.collision
+    assert not result.success
 
 
 @pytest.mark.parametrize("scenario_name", list_scenarios())

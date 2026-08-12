@@ -14,7 +14,7 @@ from core.control.mpc import MPCController
 from core.control.pure_pursuit import PurePursuitAdaptive
 from core.harness import ParkingHarness
 from core.planning.dubins import DubinsPlanner
-from core.planning.hybrid_astar import HybridAStarPlanner, brake_distance_for
+from core.planning.hybrid_astar import HybridAStarPlanner
 from core.planning.reeds_shepp import ReedsSheppPlanner
 from core.scenario_loader import list_scenarios, load_scenario
 from core.visualization.animate import render_animation
@@ -55,10 +55,7 @@ def main(argv: list[str] | None = None) -> None:
     planner = PLANNERS[args.planner]()
     controller = CONTROLLERS[args.controller](scenario.vehicle)
     seed = args.seed if args.seed is not None else scenario.seed
-    harness_kwargs = {"brake_distance": brake_distance_for(planner)} if isinstance(planner, HybridAStarPlanner) else {}
-    harness = ParkingHarness(
-        scenario.vehicle, scenario.environment, planner, controller, seed=seed, **harness_kwargs
-    )
+    harness = ParkingHarness(scenario.vehicle, scenario.environment, planner, controller, seed=seed)
 
     result = harness.run(max_steps=1000)
     status = "reached spot" if result.success else ("collision" if result.collision else "did not converge")

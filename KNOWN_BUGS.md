@@ -9,29 +9,7 @@ depth and what would need to happen to close it.
 
 ## Reproducible safety bugs
 
-### 1. Pure Pursuit reliably collides on `parallel_between_cars` under Hybrid A*
-
-**Where**: `core/control/pure_pursuit.py`'s `PurePursuitAdaptive`, exposed via
-`core/planning/hybrid_astar.py`'s obstacle-aware planner.
-**Reproduce**: `python -m core.demo parallel_between_cars --controller pure_pursuit` (the default
-planner is Hybrid A*), or `tests/test_simulation.py::test_parallel_between_cars_pure_pursuit_is_the_documented_unsafe_case`.
-**What happens**: Pure Pursuit's already-documented "no margin once curvature is at the vehicle's
-limit" weakness (DESIGN.md section 7) becomes an actual, consistent collision — 5/5 seeds, every
-time — once Hybrid A* plans a genuinely curvature-saturated, obstacle-hugging avoidance route (this
-scenario needs a reverse-gear cusp between two parked cars). Confirmed via a real parameter sweep
-that it isn't a tuning problem: widening `brake_distance` or the planner's `safety_margin` just
-trades the collision for Pure Pursuit never converging at all.
-**Current mitigation, not a fix**: pinned as a documented, tested exception
-(`tests/test_simulation.py`'s `UNSAFE_COMBINATIONS`) rather than silently allowed — the harness and
-test suite both know this combination is unsafe, but nothing prevents a caller from actually running
-it. `demo.py --controller pure_pursuit` on this scenario will still crash the car.
-**What would actually fix it**: either give Pure Pursuit a real safety net for this regime (e.g. a
-lookahead distance that adapts to local path curvature instead of a fixed constant), or accept it as
-a permanent, documented controller limitation and steer users toward MPC for tight maneuvers. Not
-attempted yet either way.
-**Full account**: DESIGN.md section 6's M2 entry, "second real finding" paragraph.
-
-### 2. MPC-ACC's gap constraint is still violated in standstill-recovery, ~0.5m below target
+### 1. MPC-ACC's gap constraint is still violated in standstill-recovery, ~0.5m below target
 
 **Where**: `core/control/acc.py`'s `MpcAccController`.
 **Reproduce**: `python -m core.validation.acc_validation --controller mpc` — the NGSIM excerpt
@@ -53,6 +31,41 @@ velocity assumption the optimizer rolls out. Not built.
 **Full account**: DESIGN.md section 11, "A real finding from validating against NGSIM."
 
 ## Scope limitations that would surface as real problems outside current usage
+
+### 2. Pure Pursuit still can't complete `parallel_between_cars` under Hybrid A* (now fails safe, not previously fixed)
+
+**Where**: `core/control/pure_pursuit.py`'s `PurePursuitAdaptive`, exposed via
+`core/planning/hybrid_astar.py`'s obstacle-aware planner; safety net in
+`core/nodes/controller_node.py`.
+**Status**: the reproducible **collision** this used to cause (5/5 seeds, every time) is fixed — see
+`ControllerNode`'s docstring and `tests/test_simulation.py::test_never_collides`, which now covers
+this combination unconditionally. What's left is a genuine, permanent scope limitation, not a safety
+bug: this combination still never *succeeds* (`tests/test_simulation.py`'s `NEVER_SUCCEEDS`,
+pinned by `test_parallel_between_cars_pure_pursuit_fails_safe_not_success`).
+**Root cause found while fixing the collision**: the old brake mechanism
+(`hybrid_astar.brake_distance_for`) computed a fixed trigger distance from the planner's own
+clearance floor (`vehicle_radius + safety_margin - buffer`) — with its default `buffer` equal to
+`safety_margin`, this collapsed to *exactly* `vehicle_radius`, i.e. the literal collision boundary,
+so the brake fired at the moment of contact rather than before it, for any speed. It wasn't
+sufficient on its own to fix, either: a real physics-based stopping-distance formula
+(`v_allowed = sqrt(2*a_max*gap)`, now `ControllerNode._safe_speed`) still requires enough stopping
+buffer that it can't fit inside Hybrid A*'s ~0.15m intentional-clearance band at anything close to
+`v_max` without also throttling speed continuously as the vehicle approaches an obstacle — which is
+what the fix now does.
+**What happens now**: Pure Pursuit's already-documented "no margin once curvature is at the
+vehicle's limit" weakness (DESIGN.md section 7) still means it can't track this scenario's
+curvature-saturated, obstacle-hugging reverse-gear cusp — but instead of the tracking error running
+away into a collision, the speed governor throttles the vehicle to a safe stop before contact. A
+real parameter sweep (lookahead, v_max, and an adaptive-lookahead variant tried while investigating
+this) confirmed it isn't a Pure-Pursuit-tuning problem: nothing in that space lets it both stay clear
+of the obstacle and keep converging. MPC's constraint-respecting rollout never needed the governor
+here — it stays collision-free and converges reliably on its own (5/5, up to ~880 steps).
+**What would actually close it**: either give Pure Pursuit a fundamentally different (non-reactive)
+fallback for curvature-saturated regimes, or accept this as a permanent, documented controller
+limitation and steer users toward MPC for tight maneuvers — same choice KNOWN_BUGS previously
+described as open, now with the collision risk removed either way.
+**Full account**: DESIGN.md section 6's M2 entry, "second real finding" paragraph;
+`core/nodes/controller_node.py`'s module docstring for the speed-governor fix.
 
 ### 3. No re-planning when a sensed obstacle isn't on the current path (parking, M4)
 

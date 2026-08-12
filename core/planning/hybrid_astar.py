@@ -36,20 +36,6 @@ STEER_SIGNS = (-1, 0, 1)  # right, straight, left -- curvature is always 0 or
 # every primitive is drivable by construction.
 
 
-def brake_distance_for(planner: "HybridAStarPlanner", buffer: float = 0.15) -> float:
-    """A brake_distance safe to pass to ParkingHarness alongside this planner.
-
-    ControllerNode's reactive sensor-based braking (a backstop for obstacles the
-    planner didn't account for) assumes the planner never intentionally gets close to
-    an obstacle -- true for DubinsPlanner/ReedsSheppPlanner, which ignore obstacles
-    entirely, but no longer true for HybridAStarPlanner, whose avoidance routes
-    deliberately pass within its own `vehicle_radius + safety_margin` clearance floor
-    by design. Sized strictly below that floor so a genuine avoidance maneuver never
-    falsely triggers the brake, while still catching truly unplanned proximity.
-    """
-    return planner.vehicle_radius + planner.safety_margin - buffer
-
-
 class PlanningFailure(RuntimeError):
     """Raised when the search budget is exhausted with no path found. Never
     silently return a partial/best-effort path -- see DESIGN.md section 8's

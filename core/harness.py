@@ -58,11 +58,7 @@ class ParkingHarness:
         tol: float = 0.4,  # looser than the pre-estimation baseline (0.3): the vehicle now
         # only ever knows its NOISY pose estimate, not ground truth, so "close enough to
         # call it parked" has to allow for realistic estimation error, not just controller error
-        # >= v_max^2/(2*a_max) stopping distance (~1.41m) + VEHICLE_RADIUS (the vehicle brakes
-        # based on a sensor reading to the obstacle SURFACE, but collision is checked between
-        # vehicle CENTER and obstacle center, so the vehicle's own radius has to be part of the
-        # margin too, not just its stopping distance) + a safety margin.
-        brake_distance: float = 3.0,
+        stopping_buffer: float = 0.5,  # see ControllerNode._safe_speed's docstring
     ):
         self.environment = environment
         self.tol = tol
@@ -87,7 +83,7 @@ class ParkingHarness:
         )
         self.estimator_node = EstimatorNode(self.bus, ekf, environment)
         self.planner_node = PlannerNode(self.bus, planner, environment, vehicle.turning_radius)
-        self.controller_node = ControllerNode(self.bus, controller, brake_distance=brake_distance)
+        self.controller_node = ControllerNode(self.bus, controller, a_max=a_max, stopping_buffer=stopping_buffer)
 
         # A controller with its own internal rollout model (e.g. MPCController) has to predict
         # forward using the *actual* tick length, or its predictions silently desync from the
