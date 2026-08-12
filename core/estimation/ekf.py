@@ -92,25 +92,56 @@ class ExtendedKalmanFilter:
         an estimated state, propagated forward and later corrected by update_speed(),
         rather than a perfect pass-through odometry input the way the 3-state
         predict() treats it. Requires the filter to have been constructed with a
-        4-element x0/p0 ([x, y, theta, v])."""
+        4-element x0/p0 ([x, y, theta, v]).
+
+        Position/heading are propagated using v_new = v + accel*dt (this tick's
+        already-updated speed), NOT the prior v -- matching Vehicle.update()'s own
+        convention (every plant node computes the new speed first, then calls
+        Vehicle.update with it, so x/y/theta integrate against the post-accel speed).
+        Using the prior v here instead is a real bug this project shipped and didn't
+        notice for a while: with H1's straight-line-only delta=0, dtheta is zero
+        either way, so the mismatch was completely invisible until real steering (H3,
+        the full closed-loop drive) started exercising a nonzero delta -- at which
+        point it showed up as a small but systematic per-tick heading bias that
+        compounded into meters of lateral drift the estimator itself couldn't see
+        (Stanley, tracking the estimate, saw a small stable error and barely
+        corrected, while the true vehicle drifted steadily away)."""
         x, y, theta, v = self.x
-        dtheta = (v / self.wheelbase) * np.tan(delta) * dt
+        v_new = v + accel * dt
+        dtheta = (v_new / self.wheelbase) * np.tan(delta) * dt
         self.x = np.array(
-            [x + v * np.cos(theta) * dt, y + v * np.sin(theta) * dt, wrap_angle(theta + dtheta), v + accel * dt]
+            [x + v_new * np.cos(theta) * dt, y + v_new * np.sin(theta) * dt, wrap_angle(theta + dtheta), v_new]
         )
         f = np.array(
             [
-                [1.0, 0.0, -v * np.sin(theta) * dt, np.cos(theta) * dt],
-                [0.0, 1.0, v * np.cos(theta) * dt, np.sin(theta) * dt],
+                [1.0, 0.0, -v_new * np.sin(theta) * dt, np.cos(theta) * dt],
+                [0.0, 1.0, v_new * np.cos(theta) * dt, np.sin(theta) * dt],
                 [0.0, 0.0, 1.0, (np.tan(delta) * dt) / self.wheelbase],
                 [0.0, 0.0, 0.0, 1.0],
             ]
         )
-        q = np.zeros((4, 4))
-        q[3, 3] = (self.accel_std * dt) ** 2  # acceleration uncertainty's direct effect on v;
-        # F above already propagates that into x/y/theta uncertainty next step, same
-        # principle as the control-dependent Q in predict(), just simpler here since
-        # accel enters the state linearly (no need for a separate V @ M @ Vᵀ term).
+        # Input-Jacobian process noise (Thrun/Burgard/Fox's control-dependent
+        # formulation, the same principle predict()'s V @ M @ Vᵀ already uses) --
+        # NOT just a bare q[3,3] = (accel_std*dt)^2, which was a real gap: it modeled
+        # acceleration uncertainty's effect on v (and, via F, everything F propagates
+        # v's uncertainty into next step) but never modeled *steering* uncertainty's
+        # direct effect on theta/x/y this same step. With H1's delta=0 that gap was
+        # invisible (tan(delta)-dependent terms are all zero); once real steering
+        # noise is actually driving dtheta each tick (H3), omitting it made the filter
+        # overconfident in its own heading estimate -- P underestimated true
+        # uncertainty, so later corrections (compass/position fixes) were weighted too
+        # lightly to keep up with real drift. u = d(x_new,y_new,theta_new,v_new)/d(accel,delta).
+        cos_delta = np.cos(delta)
+        u = np.array(
+            [
+                [np.cos(theta) * dt**2, 0.0],
+                [np.sin(theta) * dt**2, 0.0],
+                [(np.tan(delta) * dt**2) / self.wheelbase, (v_new * dt) / (self.wheelbase * cos_delta**2)],
+                [dt, 0.0],
+            ]
+        )
+        m = np.diag([self.accel_std**2, self.odom_delta_std**2])
+        q = u @ m @ u.T
         self.p = f @ self.p @ f.T + q
 
     def _apply_update(self, innovation: np.ndarray, h: np.ndarray, r: np.ndarray) -> None:

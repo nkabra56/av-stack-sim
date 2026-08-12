@@ -19,9 +19,13 @@ class AccController(Protocol):
 
 
 class AccControllerNode:
-    def __init__(self, bus: Bus, controller: AccController):
+    def __init__(self, bus: Bus, controller: AccController, output_topic: str = "longitudinal_cmd"):
         self.bus = bus
         self.controller = controller
+        self.output_topic = output_topic  # H5 Phase B: LongitudinalArbiterNode composes this
+        # node's accel candidate with IntersectionControllerNode's via a separate topic per
+        # candidate, defaulting to "longitudinal_cmd" so H1/H2-standalone (AccHarness) and H5
+        # Phase A (no intersection) are completely unaffected.
         self._ego_speed_estimate: EgoSpeedEstimateMsg | None = None
         self._radar: RadarMsg | None = None
         bus.subscribe("ego_speed_estimate", self._on_ego_speed_estimate)
@@ -35,9 +39,9 @@ class AccControllerNode:
 
     def step(self) -> None:
         if self._ego_speed_estimate is None or self._radar is None:
-            self.bus.publish("longitudinal_cmd", LongitudinalCmdMsg(0.0))
+            self.bus.publish(self.output_topic, LongitudinalCmdMsg(0.0))
             return
         ego_speed = self._ego_speed_estimate.speed
         lead_speed = ego_speed - self._radar.range_rate
         accel = self.controller.control(ego_speed, self._radar.range, lead_speed)
-        self.bus.publish("longitudinal_cmd", LongitudinalCmdMsg(accel))
+        self.bus.publish(self.output_topic, LongitudinalCmdMsg(accel))

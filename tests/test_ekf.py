@@ -136,11 +136,12 @@ def test_3state_ekf_behavior_is_unchanged_by_the_4state_extension():
 
 def test_predict_with_speed_state_matches_closed_form_constant_acceleration():
     """v update (v += accel*dt each step) is exact for constant acceleration -- Euler
-    integration of a linear ODE has no discretization error. x update (x += v*dt using
-    v from the *start* of the step) is a left-Riemann-sum approximation of the true
-    integral though, so it systematically undershoots for accelerating motion -- same
-    Euler-discretization tolerance test_vehicle.py's turning-radius test already needs
-    for the same underlying reason, not a bug in either place."""
+    integration of a linear ODE has no discretization error. x update (x += v_new*dt,
+    where v_new is *this step's already-updated* speed -- matching Vehicle.update()'s
+    own convention, see predict_with_speed_state's docstring) is a right-Riemann-sum
+    approximation of the true integral, so it systematically overshoots for
+    accelerating motion -- same Euler-discretization tolerance test_vehicle.py's
+    turning-radius test already needs for the same underlying reason, not a bug."""
     dt = 0.1
     accel = 2.0
     ekf = _speed_ekf(x0=(0.0, 0.0, 0.0, 10.0), accel_std=0.0)

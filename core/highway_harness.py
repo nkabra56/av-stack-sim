@@ -70,7 +70,9 @@ class AccHarness:
         ekf = ExtendedKalmanFilter(
             x0=np.array([ego_start_position, 0.0, 0.0, ego_initial_speed]),
             p0=np.diag([1.0, 1.0, 0.1, 0.5]),
-            wheelbase=2.7,  # unused for H1 (delta always 0); kept for API consistency with H3
+            wheelbase=2.7,  # unused here (H1-standalone never publishes steering_odometry, so
+            # SpeedEstimatorNode's delta stays 0.0 -- see speed_estimator_node.py); load-bearing
+            # once real steering flows in via the full closed-loop drive (core/full_highway_harness.py)
             odom_v_std=0.0,
             odom_delta_std=0.0,
             r_heading=1.0,  # unused (update_heading never called in this mode)

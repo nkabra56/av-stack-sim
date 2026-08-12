@@ -5,11 +5,10 @@ milestones M1 (correct baseline), the control half of M3 (MPC), ME (state estima
 architecture), MV (real-data EKF validation against KITTI), and **M2 (Hybrid A* + Reeds-Shepp
 obstacle-aware planning)** are done. All four highway-mode milestones — **H1 (adaptive cruise
 control)**, **H2 (fused ego speed via an extended EKF)**, **H3 (lane centering)**, and **H4
-(intersection navigation)** — are also done, each validated or tested standalone. The one thing
-left on the highway side isn't a new milestone: it's combining H1/H2's ACC with H3's lane centering
-(and H4's intersection logic) into one closed loop over a single `Vehicle`, deliberately deferred
-at each step rather than attempted all at once — see DESIGN.md section 12's "Full closed-loop
-highway drive" entry. On the parking side, M4 (sensing & re-planning) and M5/M6 (visualization
+(intersection navigation)** — are also done, each originally validated standalone, and **H5 (the
+full closed-loop highway drive, H1+H2+H3+H4 all composed onto one Vehicle) is now done too**, built
+in two deliberately sequenced phases — see DESIGN.md section 12's H5 entry. The highway side is
+now fully integrated; on the parking side, M4 (sensing & re-planning) and M5/M6 (visualization
 polish, CI) are what's next — see Section 3 for the full roadmap.
 
 ## 1. Directory structure
@@ -29,12 +28,18 @@ core/
                        # LandmarkBearingMsg, ObstacleRangeMsg, PoseEstimateMsg, PathMsg,
                        # ControlCmdMsg -- highway: LeadVehicleStateMsg, EgoLongitudinalStateMsg,
                        # RadarMsg, LongitudinalCmdMsg, AccelOdometryMsg, SpeedometerMsg,
-                       # EgoSpeedEstimateMsg -- see DESIGN.md section 2
+                       # EgoSpeedEstimateMsg (H2, now carries x/y/theta too) -- H5:
+                       # LateralCmdMsg, SteeringOdometryMsg, EgoHighwayStateMsg -- see
+                       # DESIGN.md section 2
   estimation/
     __init__.py
     ekf.py             # ExtendedKalmanFilter: predict + 3 correction types (3-state, parking) +
-                       # predict_with_speed_state/update_speed (4-state, H2/highway), see
-                       # DESIGN.md section 5 and section 12's H2 entry
+                       # predict_with_speed_state/update_speed (4-state, H2/highway) -- H2's
+                       # process model got two correctness fixes while building H5 (propagate
+                       # against the *new* speed each tick, not the prior one; model steering-
+                       # reading uncertainty in the process noise, not just accel's), both
+                       # invisible under H1's delta=0 straight-line-only use, see DESIGN.md
+                       # section 5 and section 12's H2/H5 entries
   validation/
     __init__.py
     kitti_loader.py       # parses KITTI poses.txt -> KittiSequence(times,x,y,theta,v,yaw_rate)
@@ -65,15 +70,32 @@ core/
     ego_longitudinal_node.py # 1D point-mass ego state; also publishes noisy accel_odometry/
                        # speedometer readings (H2) for SpeedEstimatorNode to fuse
     radar_node.py         # noisy bumper-to-bumper range + range-rate to the lead vehicle
-    speed_estimator_node.py  # wraps the EKF's 4-state mode, publishes ego_speed_estimate (H2)
+    speed_estimator_node.py  # wraps the EKF's 4-state mode, publishes ego_speed_estimate (H2);
+                       # H5: also corrects on compass/position_fix (see section 12's H5 entry)
     acc_controller_node.py   # wraps an ACC controller; acts on the fused speed estimate
                        # (not true speed), one accel command per tick
+    highway_vehicle_node.py  # H5: real 2D Vehicle plant for the closed-loop drive -- accel-in
+                       # (not desired-speed-in like VehicleNode), publishes on H1's ego_state
+                       # topic unchanged plus a new full-pose topic and steering/compass/
+                       # position-fix readings, see section 12's H5 entry
+    lane_centering_node.py   # H5: wraps StanleyController, acts on the fused pose+speed estimate
+    longitudinal_arbiter_node.py  # H5 Phase B: min() over accel candidate topics -- ACC's real-
+                       # lead-vehicle accel vs. IntersectionNavigator's stop-line accel
+    intersection_controller_node.py  # H5 Phase B: wraps IntersectionNavigator, feeds it the
+                       # fused estimate (not ground truth, a first for H4), publishes an accel
+                       # candidate for the arbiter
+    other_vehicle_script_node.py  # H5 Phase B: thin Bus adapter for H4's existing
+                       # OtherVehicleScript/other_vehicle_present_from, unchanged
   harness.py            # tick-based executor (parking mode): owns the Bus, builds all 5 nodes
   highway_harness.py       # tick-based executor (ACC/H1+H2 mode): owns the Bus, builds the
                        # longitudinal nodes -- mirrors harness.py's structure, kept separate
                        # rather than forcing a shared base class before H3 shows what's common
   intersection_harness.py    # direct simulation loop (no Bus -- H4 has no sensor noise/fusion
                        # to decouple) for IntersectionNavigator scenarios, see section 12's H4 entry
+  full_highway_harness.py    # H5: tick-based executor combining H1+H2+H3 on one real Vehicle --
+                       # kept separate from harness.py/highway_harness.py, same reasoning as
+                       # highway_harness.py's own docstring for staying separate from harness.py,
+                       # see section 12's H5 entry
   planning/
     __init__.py
     dubins.py            # M1 baseline: curvature-feasible fixed path, no obstacle avoidance.
@@ -88,6 +110,8 @@ core/
     mpc.py              # nonlinear MPC (direct shooting, SLSQP)
     acc.py              # IDMController + MpcAccController (longitudinal, see DESIGN.md section 11)
     lane_centering.py       # StanleyController (lateral, see DESIGN.md section 12's H3 entry)
+    lane_geometry.py       # H5: arc-length along a curved centerline (build_arc_length_table,
+                       # project_to_arc_length, pose_at_arc_length), see section 12's H5 entry
   visualization/
     __init__.py
     animate.py            # true vs. estimated trajectory + covariance ellipse + planned path
@@ -111,6 +135,13 @@ tests/
   test_acc_validation.py    # IDM/MPC-ACC vs. real NGSIM data: safety, plausibility, determinism
   test_lane_centering.py    # Stanley convergence (both directions) + steering/speed edge cases
   test_lane_centering_validation.py  # Stanley vs. the real derived lane centerline
+  test_intersection.py     # H4 state-machine + right-of-way branch coverage
+  test_full_highway.py     # H5 Phase A: collision safety, real-data coherence, cross-track-error
+                       # and gap plausibility, determinism, a direct regression test for the H2
+                       # delta=0.0 hardcode fix -- Phase B: stop-line compliance under the
+                       # composed accel arbiter (incl. the non-blocking-lead stress case) and
+                       # the four right-of-way branches, re-derived against this harness's own
+                       # approach dynamics -- see section 12's H5 entry
 pyproject.toml
 DESIGN.md
 IMPLEMENTATION.md
@@ -247,8 +278,8 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   convergence test before any validation module existed to catch it later (the controller
   diverged from a 2m offset to 374m within 30 seconds when the cross-track-error sign was
   backwards), and for what's explicitly deferred: combining H1/H2's ACC with H3's Stanley control
-  into one closed loop over a single `Vehicle` is real follow-up work, not done in this pass.
-  M2 (below) and H4 (DESIGN.md section 12) are next, in either order — they're independent.
+  into one closed loop over a single `Vehicle` is real follow-up work, not done in this pass (see
+  H5 below for where that landed).
 - **M2 — Planning: done.** `planning/reeds_shepp.py` (Reeds-Shepp curves, CSC family only) and
   `planning/hybrid_astar.py` (obstacle-aware search using Reeds-Shepp as heuristic/analytic
   connector) replace the fixed Dubins path with `HybridAStarPlanner` as the default planner
@@ -261,6 +292,24 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   the "Found while building M2" entries below for the two real issues this surfaced: reactive
   braking defeating intentional close passes, and Pure Pursuit's pre-existing curvature-limit
   weakness becoming an actual safety failure rather than just an efficiency loss).
+- **H5 — Full closed-loop highway drive: done, both phases.** **Phase A** (H1+H2+H3 on one
+  Vehicle): `full_highway_harness.py`'s `FullHighwayHarness` + `highway_vehicle_node.py`'s
+  `HighwayVehicleNode` (a new real-`Vehicle` plant node, accel-in like `EgoLongitudinalNode`, not
+  desired-speed-in like `VehicleNode` — see DESIGN.md section 12's H5 entry for why that
+  distinction matters) + `lane_geometry.py` (arc-length along the real centerline). Found and fixed
+  three real bugs in `estimation/ekf.py`'s 4-state mode along the way, all masked until now by H1's
+  `delta=0` straight-line-only use: a speed-propagation timing bug, a missing steering-uncertainty
+  process-noise term, and a complete absence of absolute heading/position correction (fixed by
+  reusing parking's `CompassMsg`/`PositionFixMsg`/`update_heading`/`update_position` unchanged).
+  **Phase B** (routing H4's intersection logic through the same composed loop): built deliberately
+  second, once Phase A was verified — `longitudinal_arbiter_node.py`'s `LongitudinalArbiterNode`
+  composes ACC's and `IntersectionNavigator`'s accel candidates via `min()`. Directly stress-tested
+  the one real, non-obvious edge case this composition raises (ACC free to cruise unconstrained the
+  whole approach, in principle risking a later, faster crossing of the stop-line detection window
+  than `IntersectionNavigator` was ever validated at standalone) with a synthetic worst-case
+  scenario rather than just reasoning about it — held up cleanly, now pinned as a permanent
+  regression test. Full account, including the measured before/after numbers for both phases, in
+  DESIGN.md section 12's H5 entry.
 - **M4 — Sensing & re-planning**: sensor is already a multi-beam array (`[-0.6, -0.3, 0.0, 0.3,
   0.6]` rad) and braking already checks all beams, not just the front one. Still open: wiring
   `PlannerNode` to re-plan (not just `ControllerNode` to brake) when `SensorNode` reports an
@@ -269,15 +318,14 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   trajectory, a covariance ellipse, and the planned path (landed as part of ME, since the whole
   point of adding an estimator is visible directly in that comparison). Still open: a genuinely
   multi-panel layout (live sensor readings, speed profile) alongside the top-down view.
-- **M6 — Tests & CI**: 136 tests across both modes run in ~100s; no GitHub Actions workflow yet.
+- **M6 — Tests & CI**: 160 tests across both modes run in ~200-265s; no GitHub Actions workflow yet.
 
 ## 4. Testing strategy
 
-Current (136 tests, ~100s -- up from ~20s pre-M2, almost entirely because Hybrid A*'s longer,
-more circuitous avoidance routes need more simulation steps to converge (raised from 500 to 1000)
-and more (scenario, controller) combinations are now exercised at that budget; the planning calls
-themselves are cheap, measured at under 1s combined across the whole suite, so memoizing them
-wasn't worth the complexity):
+Current (160 tests, ~200-265s -- up from ~100s pre-H5, almost entirely because `test_full_highway.py`
+replays a real 78s/780-frame NGSIM trajectory through the full node graph, parametrized over
+multiple controllers and seeds; the M2-era jump from ~20s to ~100s is explained in
+IMPLEMENTATION.md's M2 section above):
 
 - Kinematic checks: driving straight for N steps moves `x` by `v*N*dt` with `theta` unchanged; a
   fixed steering angle over time traces a circle of radius `L / tan(delta)`; `turning_radius`
@@ -326,6 +374,22 @@ wasn't worth the complexity):
   (the same style of check that caught the infeasible-Bezier bug during M1 — see DESIGN.md section
   6), (c) for `HybridAStarPlanner` specifically, on the 3 obstacle scenarios, never comes within
   the vehicle's radius of any obstacle.
+- Full closed-loop drive (H5, `test_full_highway.py`), against real NGSIM data throughout: never
+  collides with the replayed real leader (hard pass/fail, ground truth); cross-track error settles
+  under H3's own real-driver-scatter bar, now measured on the EKF-fused pose under real composed
+  control rather than assumed identical to the ground-truth-fed standalone result; gap lands in a
+  plausible range relative to the real follower (same 0.2x-3.0x band as H1's own check); one run
+  asserts collision-safety and lane-tracking together (not just as separate parametrized checks) to
+  catch interaction bugs neither alone would surface; deterministic for a fixed seed; a direct
+  regression test for the H2 `delta=0.0` hardcode fix (feed a real nonzero steering reading, assert
+  the filter's heading actually responds — impossible under the old hardcoded behavior). Phase B
+  (intersection routing) adds: never crosses the stop line without having stopped, with a real
+  non-blocking lead vehicle present and ACC free to cruise unconstrained the whole approach (the
+  specific accel-arbiter edge case DESIGN.md section 12's H5 entry raises and stress-tests, not
+  just reasons about); the four right-of-way branches H4's own standalone tests already cover
+  (yield to first-arrived, proceed when ego arrived first, yield to the right on simultaneous
+  arrival, don't yield to the left), re-derived against this harness's own real approach dynamics
+  rather than reusing H4's exact timings verbatim.
 
 Planned, still not built (currently integration-level coverage via `test_simulation.py` is
 enough, but won't scale as `sensors.py`/the controllers grow):
@@ -551,3 +615,46 @@ Found while building M2 (Hybrid A* + Reeds-Shepp):
   derivations landed on identical points) *before* building `hybrid_astar.py` on top of it -- the
   same "verify before you build on it" discipline as the KITTI axis-convention check and H3's
   Stanley sign-convention bug, applied one level earlier in the pipeline this time.
+
+Found while building H5 (full closed-loop highway drive, Phase A) -- three bugs, all in
+`estimation/ekf.py`'s 4-state mode, all invisible until now for the identical reason: H1's
+straight-line-only use kept `delta` at exactly 0 forever, zeroing out every code path each one
+lived in. Caught by direct empirical comparison (true vs. estimated pose, tick by tick, then a
+zero-noise isolation run) rather than staring at the formulas -- the same "measure, don't assume"
+discipline this project applies everywhere, just needed three rounds of it in a row here:
+
+- `predict_with_speed_state` propagated x/y/theta using the *prior* tick's speed, then updated the
+  speed state separately -- but every plant node (`EgoLongitudinalNode`, and the new
+  `HighwayVehicleNode`) computes the *new* speed first and calls `Vehicle.update` with that. First
+  symptom: cross-track error grew to tens of meters while the estimate itself looked fine and
+  Stanley's commanded steering stayed near zero the whole time -- the controller wasn't broken, it
+  was correctly holding the *estimate* on the path while the *true* vehicle drifted away underneath
+  it, because the estimate's own process model didn't match the real plant it was supposed to be
+  tracking. Fixed by computing `v_new = v + accel*dt` first and propagating x/y/theta with `v_new`
+  throughout (Jacobian re-derived to match).
+- Even after that fix, drift persisted -- smaller, but still meters over a full run. Isolated with
+  a zero-noise experiment first (confirmed the process model itself was now exactly correct: near-
+  zero drift with noise stds set to ~0) before looking further, which pointed squarely at *how*
+  realistic noise was being handled rather than at the propagation formula again. `Q` only ever
+  modeled acceleration uncertainty (`q[3,3]`), never steering-reading uncertainty's effect on
+  theta/x/y the way the 3-state `predict()`'s full input-Jacobian `V @ M @ Vᵀ` already does --
+  invisible under H1 (every `tan(delta)`-dependent term is zero there), and it made the filter
+  overconfident, weighting later corrections too lightly. Fixed by generalizing to the same
+  input-Jacobian approach, reusing the existing (previously-unread-by-this-method) `odom_delta_std`
+  parameter.
+- Residual drift *still* remained even with both fixes, isolated to: the highway EKF has no
+  absolute heading or position correction at all -- no compass, position fix, or landmark
+  equivalent, unlike parking's full three-sensor suite. Invisible under H1/H2 because nothing had
+  ever consumed the estimate's x/y/theta before (only `.speed` was read) -- pure dead-reckoning
+  drift is harmless when nobody's looking at where it drifts to. Once Stanley started steering off
+  the estimate, realistic steering noise random-walked the heading estimate away from truth over
+  the real ~600m/78s NGSIM scenario. Fixed by having `HighwayVehicleNode` also publish an always-on
+  noisy compass and a low-rate noisy position fix, reusing `CompassMsg`/`PositionFixMsg`/
+  `update_heading`/`update_position` completely unchanged -- exactly the reuse H2's original design
+  already anticipated by generalizing those methods to `len(self.x)` instead of a hardcoded 3.
+
+With all three fixed: cross-track error never exceeds its initial offset and settles to an RMS of
+~0.27-0.33m across seeds (H3 standalone's own bar is 0.46m), and ACC's realized gap (~2.2m) matches
+H1/H2's own standalone numbers -- confirming H1/H2's validated dynamics really did carry over
+unchanged once `HighwayVehicleNode` reused `EgoLongitudinalNode`'s exact integration physics. See
+DESIGN.md section 12's H5 entry for the full account.

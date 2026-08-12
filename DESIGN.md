@@ -574,6 +574,104 @@ not a strict target, since the real driver isn't assumed optimal).
   datasets (INTERACTION, inD) are registration-gated, like highD (below) — an optional upgrade,
   not a blocker. Every scenario also asserts the ego vehicle never crosses the stop line without
   having fully stopped first — compliance, not just liveness.
+- **Full closed-loop highway drive (H5), Phase A — H1+H2+H3 on one Vehicle: done.**
+  `core/full_highway_harness.py`'s `FullHighwayHarness`: a real `Vehicle` whose speed comes from
+  ACC (H1, radar-gap car-following against a real replayed NGSIM leader) and whose steering comes
+  from Stanley (H3, tracking a real NGSIM-derived lane centerline), both fused by one 4-state EKF
+  (H2). `core/nodes/highway_vehicle_node.py`'s `HighwayVehicleNode` is the new ego plant node this
+  needed — deliberately not a modification of `EgoLongitudinalNode` (which H1/H2-standalone keep
+  using unchanged, same "two nodes for two genuinely different situations" precedent as the EKF's
+  own `predict()`/`predict_with_speed_state()` split) and not parking's `VehicleNode` either (which
+  tracks a *desired speed* via its own P-controller — ACC's controllers command *acceleration*
+  directly, and validated their safety behavior, e.g. IDM's `a_min=-9` floor, against that exact
+  integration; routing it through a second desired-speed-tracking layer would have quietly changed
+  H1/H2's already-NGSIM-validated closed-loop dynamics). `core/control/lane_geometry.py` handles
+  gap/stop-line position on a curved road as arc-length along the centerline rather than raw
+  Euclidean x, needed once the ego's `(x, y)` genuinely leaves the x-axis under real steering.
+
+  **Real data, two different NGSIM extracts**: the lane centerline is NGSIM US-101 **lane 2**; the
+  replayed leader (H1's own committed excerpt) is recorded in **lane 1** — same road and location,
+  not the same lane, verified directly against the committed files and documented in
+  `full_highway_harness.py`'s docstring rather than hidden. Both use NGSIM's shared along-road
+  `local_y` coordinate, and the ranges do overlap (leader 37.5-661.5m vs. centerline 14.8-656.8m).
+
+  **Three real bugs found building this, all in the H2 EKF, all invisible until now for the same
+  reason**: H1's straight-line-only use kept `delta` at exactly 0 forever, which zeroed out every
+  code path these bugs lived in.
+  1. `predict_with_speed_state` propagated x/y/theta using the *prior* speed, then updated speed
+     separately — but every plant node (`EgoLongitudinalNode`, and now `HighwayVehicleNode`)
+     computes the *new* speed first and integrates `Vehicle.update` with that. With `delta=0`,
+     `dtheta` is zero regardless of which speed is used, so the mismatch was completely invisible
+     under H1. Once Stanley commanded real nonzero steering, it produced a small but systematic
+     per-tick heading bias that compounded into meters of true lateral drift the estimate itself
+     never saw. Fixed by computing `v_new = v + accel*dt` first and using it throughout, matching
+     the plant's own convention exactly (re-derived the Jacobian accordingly).
+  2. `predict_with_speed_state`'s process noise `Q` only ever modeled acceleration uncertainty
+     (`q[3,3]`) — unlike the 3-state `predict()`, which properly propagates *both* the odometry
+     speed's and the odometry steering angle's uncertainty into position/heading uncertainty via a
+     full input-Jacobian `V @ M @ Vᵀ` term. With `delta=0` this gap was invisible (every
+     `tan(delta)`-dependent term is zero); with real steering noise actually driving `dtheta` each
+     tick, the filter became overconfident in its own heading estimate, weighting later corrections
+     too lightly to keep pace with real drift. Fixed by generalizing to the same input-Jacobian
+     approach `predict()` already uses, reusing the existing `odom_delta_std` constructor parameter
+     (never previously read by this method) for steering-reading uncertainty.
+  3. The highway EKF had **no absolute heading or position correction at all** — no compass,
+     position fix, or landmark equivalent, unlike parking's full three-sensor EKF. That was
+     invisible under H1/H2 because nothing ever *used* the estimate's x/y/theta (only its `.speed`
+     was consumed) — pure dead reckoning drifting was harmless when nobody was looking at where it
+     drifted to. Once Stanley started steering off the estimate, realistic steering-sensor noise
+     random-walked the heading estimate away from truth over the ~600m/78s scenario, and the
+     control loop faithfully kept the *estimate* near the lane while the *true* vehicle wandered
+     meters away — a textbook illustration of why real ADAS lateral control needs more than wheel/
+     IMU dead reckoning. Fixed by having `HighwayVehicleNode` also publish an always-on noisy
+     compass and a low-rate noisy position fix — reusing `CompassMsg`/`PositionFixMsg`/
+     `update_heading`/`update_position` completely unchanged, exactly the reuse H2's own original
+     design already anticipated by generalizing those methods to `len(self.x)` instead of a
+     hardcoded 3.
+
+  With all three fixed: cross-track error never exceeds its initial offset (i.e. genuinely
+  converges, not just "stays finite") and settles to an RMS of ~0.27-0.33m across seeds — safely
+  under H3 standalone's own real-driver-lateral-scatter bar (0.46m) — while ACC's gap-keeping
+  behavior (min gap ~2.2m) matches H1/H2's own standalone numbers, confirming H1/H2's dynamics
+  really did carry over unchanged. `tests/test_full_highway.py` checks collision safety, real
+  NGSIM data coherence, cross-track-error plausibility, gap plausibility, determinism, and pins the
+  H2 fix with a direct regression test (feed a real nonzero steering reading, assert the filter's
+  heading actually moves — impossible if `delta` were still hardcoded to 0).
+- **Full closed-loop highway drive (H5), Phase B — H4 routing: done.** `IntersectionNavigator`
+  layered on top of Phase A by composing its stop-line/right-of-way accel with ACC's real-lead-
+  vehicle accel via `nodes/longitudinal_arbiter_node.py`'s `LongitudinalArbiterNode`: `min()` over
+  every registered accel-candidate topic, the more conservative demand wins each tick.
+  `AccControllerNode` gained an additive `output_topic` constructor parameter (default unchanged,
+  `"longitudinal_cmd"`, so H1/H2-standalone and Phase A are completely unaffected) so it can publish
+  a *candidate* instead of the final command. `nodes/intersection_controller_node.py`'s
+  `IntersectionControllerNode` wraps `IntersectionNavigator` the same "store latest, act once per
+  tick" pattern every other controller node uses, feeding it the **fused pose+speed estimate**
+  (via `lane_geometry.project_to_arc_length`) rather than ground truth — the first time H4 has had
+  to follow the "controllers only see estimates" rule at all (its own standalone harness uses true
+  state directly, justified there by having no EKF running in that mode at all; that justification
+  stops applying once it's wired into a loop that has one).
+
+  Built deliberately after Phase A, not in the same pass, because the composition has a real,
+  non-obvious edge case worth its own focused test: `IntersectionNavigator`'s approach-to-stop-line
+  constants were validated standalone assuming *sole* authority over the whole approach, so if ACC
+  is less conservative for the early/middle part of the approach (the common case — no real lead
+  vehicle nearby to slow it down), the realized speed near the line could in principle be higher
+  than the standalone-validated trajectory ever reaches at that distance, risking the same "ran the
+  stop sign" failure mode H4's own tests already guard against — caused by composition, not either
+  component alone. **Directly stress-tested, not just reasoned about**: a synthetic scenario with a
+  fast (30 m/s), effectively non-blocking lead vehicle — deliberately the worst case, ACC free to
+  cruise at its own high `v0` the entire approach with nothing slowing it down early — still stops
+  cleanly before the line (measured: ego speed drops to ~6.9 m/s by 10m out, well within the
+  detection window, regardless of how fast it was cruising moments before). This holds because both
+  `IDMController.control()` and `IntersectionNavigator.control()` are memoryless functions of the
+  current tick's actual `(position, speed)`, and the intersection candidate's braking demand grows
+  smoothly and unboundedly (down to the shared `a_min` floor) as the gap to the stop line shrinks —
+  so there's always a point close enough to the line where it overtakes ACC's cruise-accel demand
+  in the `min()` comparison, regardless of how permissive ACC was further back. `test_full_highway.py`
+  pins this down as a real regression test (not just a one-off check) plus the four right-of-way
+  branches H4's own standalone tests already cover (yield to first-arrived, proceed when ego
+  arrived first, yield to the right on simultaneous arrival, don't yield to the left), re-derived
+  against this harness's own real approach dynamics rather than reusing H4's timings verbatim.
 - **Robust/stochastic MPC for ACC**, closing the gap noted in Section 11: tighten the gap
   constraint by a margin proportional to prediction uncertainty instead of a fixed empirically-
   chosen `min_gap`, so the safety margin adapts to how much the lead vehicle's behavior is
@@ -582,12 +680,6 @@ not a strict target, since the real driver isn't assumed optimal).
   provides, free for non-commercial use but registration-gated (a manual data-request form, no
   anonymous download) — worth it once lane geometry precision actually matters, not required to
   build H3 in the first place.
-- **Full closed-loop highway drive**: combine H1 (ACC, longitudinal), H2 (fused speed), and H3
-  (Stanley, lateral) into one loop over a single `Vehicle`, then route it through H4's
-  intersection logic — each piece is validated standalone today; wiring them together is the
-  natural next integration milestone once there's a concrete reason to (e.g. a scenario that
-  needs more than one capability at once, the same trigger that would motivate generalizing
-  `harness.py`/`highway_harness.py` into a shared base, per Section 2).
 - **Full 2D intersection geometry**: H4's single-conflict-point model captures priority reasoning
   but not actual crossing paths, turning movements, or more than two approaches at once — a real
   4-way intersection simulation with lane-level geometry per approach.

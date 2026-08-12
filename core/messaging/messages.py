@@ -133,5 +133,36 @@ class SpeedometerMsg:
 
 @dataclass(eq=False)
 class EgoSpeedEstimateMsg:
+    x: float  # degenerate (near 0) for H1 straight-line-only use; meaningful once H3
+    y: float  # lane centering reintroduces real lateral motion -- see DESIGN.md
+    theta: float  # section 12's H2 entry, which anticipates exactly this extension.
     speed: float
-    covariance: np.ndarray  # (4, 4), the full state covariance (position/heading unused by H1)
+    covariance: np.ndarray  # (4, 4), the full [x,y,theta,v] state covariance
+
+
+# --- H3/full closed-loop: bringing the 2D kinematic Vehicle back into the highway
+# mode, alongside H1/H2's longitudinal machinery, on one ego. SteeringOdometryMsg is
+# the highway-mode analog of parking's OdometryMsg.delta_meas -- a noisy reading of
+# the actually-applied steering angle, needed once predict_with_speed_state() gets a
+# real (non-zero) delta each tick. EgoHighwayStateMsg is TrueStateMsg's highway-mode
+# analog: full ground-truth pose, visible only to the harness's own evaluation logic.
+
+
+@dataclass(frozen=True)
+class LateralCmdMsg:
+    delta: float  # rad
+
+
+@dataclass(frozen=True)
+class SteeringOdometryMsg:
+    delta: float  # rad, noisy reading of the actually-applied steering angle
+
+
+@dataclass(frozen=True)
+class EgoHighwayStateMsg:
+    x: float
+    y: float
+    theta: float
+    speed: float
+    accel: float  # m/s^2, last applied
+    delta: float  # rad, last applied
