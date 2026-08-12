@@ -81,33 +81,72 @@ from "raw unplanned proximity" -- e.g. relax `stopping_buffer` toward the planne
 `hybrid_astar.brake_distance_for` used to try to make statically (see entry 1's history) before it
 turned out to need to be dynamic, not fixed. Not attempted yet.
 
-### 4. H4's intersection model is a single conflict point, not real 2D geometry
+### 4. H4's intersection model has no notion of turning movements
 
-**Where**: `core/control/intersection.py`'s `IntersectionNavigator`.
-**What happens**: models right-of-way as mutual exclusion + arrival-order priority at one point two
-approaches share — correct for the stop-sign scenarios it's validated against, but has no notion of
-actual crossing paths, turning movements, or more than two approaches at an intersection. A scenario
-needing real lane-level intersection geometry isn't representable with the current model at all.
-**What would close it**: a real 4-way intersection simulation with lane-level geometry per approach
-— a substantial new milestone, not a small fix. Noted as future work in DESIGN.md section 12, not
-started.
+**Where**: `core/control/intersection_geometry.py` / `core/intersection2d_harness.py`.
+**Status**: the original gap — no real crossing paths, no way to check more than two approaches, no
+geometric verification that right-of-way reasoning actually prevents a collision — is closed.
+`intersection_geometry.py` gives the intersection a real 2D layout (perpendicular roads, right-hand-
+traffic lane offsets, a genuine conflict-zone box, `is_to_the_right` derived from actual travel
+headings instead of a hand-set flag); `intersection2d_harness.py` runs any number of real vehicles
+— each still just an unmodified `IntersectionNavigator`, the same reuse principle H4 always used for
+`IDMController` — through it, deriving every vehicle's view of the others from real simulated state
+instead of a script, and checking actual circle-to-circle proximity, not just arrival-order
+bookkeeping. Verified directly (`tests/test_intersection_geometry.py`): 2-, 3-, and 4-way scenarios
+all resolve with zero real collisions and correct proceed order, parallel (non-crossing) approaches
+are recognized as such, and — to confirm the check isn't vacuous — a deliberately non-compliant
+navigator is caught colliding on a pairing the compliant version already proved safe. A real,
+physical finding along the way: the geometric constants (conflict-zone size, lane offset, stop
+margin) aren't independent of `VEHICLE_RADIUS` — an under-sized intersection can put a vehicle
+waiting at its own stop line within collision range of the perpendicular through-lane, a spacing
+requirement the old single-point model never had to reason about at all; the module docstring/
+harness comments carry the derivation.
+**What's still open**: turning movements (e.g. left-turn-yields-to-oncoming-through-traffic) —
+every vehicle in this model goes straight through its own approach. Deliberately deferred rather
+than attempted in the same pass (this project's own precedent: H1 longitudinal-only before H3, H3
+uncombined before H5) since it needs real per-turn path geometry — a curved connector from one
+approach's lane to another's — not just an additional straight approach.
+**What would close it**: give turning vehicles a real curved path between approaches (reusing
+Reeds-Shepp/Dubins-style curve generation from the parking side is a plausible starting point, since
+the underlying geometry problem — connect two poses with a drivable curve — is the same one already
+solved there) and extend the right-of-way check to "yield to oncoming through traffic while
+turning left," the one real-world rule this model still can't express. Not started.
 
-### 5. Reeds-Shepp/Hybrid A* have no CCC (3-point-turn) family — raises rather than degrades for very close poses
+### 5. CCC (3-point-turn) family: closed — but the original premise was wrong
 
-**Where**: `core/planning/reeds_shepp.py`.
-**What happens**: `reeds_shepp_path`/`ReedsSheppPlanner` only implement the CSC family (8
-candidates: 4 Dubins families × forward/backward). When start and goal turning circles are closer
-together than ~4× `turning_radius`, no CSC candidate exists, `reeds_shepp_path` returns `None`, and
-`ReedsSheppPlanner.plan()` raises `RuntimeError`. `HybridAStarPlanner` degrades gracefully in this
-regime (its primitive-by-primitive search can still compose the same maneuver out of ordinary
-forward/reverse steps), but the *standalone* Reeds-Shepp planner cannot. Verified this doesn't
-currently trigger for any of the 5 shipped scenarios, so it's not live today — but it's a real crash
-waiting for whichever future scenario needs a start/goal pair that close together and reaches for
-`ReedsSheppPlanner` directly (e.g. via `demo.py --planner reeds_shepp`).
-**What would close it**: implement the CCC (LRL/RLR) family — the classic "3-point-turn" curves,
-deliberately scoped out of M2. Noted in DESIGN.md section 6's alternatives-considered list as
-"genuine future work if a scenario is ever added where ... Hybrid A*'s primitive-composed fallback
-isn't good enough."
+**Where**: `core/planning/reeds_shepp.py`, `core/planning/dubins.py`, `core/planning/hybrid_astar.py`.
+**Status**: this used to be tracked as "`reeds_shepp_path`/`ReedsSheppPlanner` only implement CSC, so
+`RuntimeError` when start/goal turning circles are closer than ~4× `turning_radius`." That premise
+doesn't hold: a global optimization search over every `(alpha, beta, d)` combination, using the
+actual `_lsl`/`_rsr`/`_lsr`/`_rsl` functions, found **no case** where all 4 CSC families are
+simultaneously infeasible, even as `d -> 0` — confirmed directly with 20,000 random trials through
+`ReedsSheppPlanner.plan()` targeting exactly that regime, producing zero `RuntimeError`s. CSC (using
+all 4 families, not just 2) was apparently always sufficient for *feasibility* here; CCC's absence
+was never actually a crash risk, and `dubins.py`'s identical "CCC only matters when circles are
+close" scoping note carries the same mistaken premise (not fixed there — DubinsPlanner is a separate,
+forward-only baseline outside this entry's original "Where," so its docstring is left as historical
+context, not corrected).
+**What was real, and is now fixed**: in that same close-pose regime, CCC is strictly *shorter* than
+the best CSC candidate in ~30% of random trials, sometimes by close to 2× — a genuine path-quality
+gap. `reeds_shepp.py` now implements CCC (LRL/RLR) via direct geometric construction (tangent-circle
+centers, not a from-memory trig formula — verified by reconstructing thousands of random candidates
+through the same arc-stepping machinery already used elsewhere and checking the endpoint, plus a
+20,000-trial no-crash check and a length-vs-actual-path-length consistency check, all pinned in
+`tests/test_planning.py`). A second, unrelated latent bug turned up while validating it:
+`reeds_shepp_length` unconditionally included the Euclidean-distance lower bound in its `min()`,
+which (since a curved path can never be shorter than the straight line between its endpoints) meant
+it almost always just returned that lower bound outright, silently discarding the "shortest of real
+candidates" its docstring claimed — fixed to only fall back to Euclidean distance when nothing else
+is feasible.
+**A real finding from wiring it in**: CCC is NOT enabled for `HybridAStarPlanner` (`include_ccc=False`
+at all 4 of its call sites, and the Euclidean-fallback fix travels with that same flag). CCC's shorter
+paths are more curvature-aggressive than CSC's, and since Hybrid A*'s analytic expansion is attempted
+from every search node once it's near the goal — not just the one final connection — enabling CCC
+there measurably reopened bug 1's Pure Pursuit collision on 3 scenarios, including 2
+(`perpendicular_flanked`, `perpendicular_obstructed_lane`) that were previously perfectly safe.
+`HybridAStarPlanner` already degrades gracefully without CCC (composes the same 3-point-turn shape
+out of ordinary primitives when needed), so it doesn't need the family and isn't worth the risk.
+Pinned by `tests/test_planning.py::test_hybrid_astar_does_not_use_ccc`.
 
 ### 6. H5's real leader and lane centerline are from different NGSIM lanes
 

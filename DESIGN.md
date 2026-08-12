@@ -338,9 +338,15 @@ Alternatives considered:
 - **Keep the fixed Dubins path, just add obstacle checks** — rejected for the same reason the
   Bezier curve was: it can't express "go around an obstacle in the way," only "stop in front of
   it."
-- **Full 12-formula Reeds-Shepp (CCC included)** — rejected for M2; see the CSC-scoping rationale
-  above. Genuine future work if a scenario is ever added where start/goal turning circles are
-  closer than 4x turning_radius and Hybrid A*'s primitive-composed fallback isn't good enough.
+- **Full 12-formula Reeds-Shepp (CCC included)** — rejected for M2, on the assumption that CSC
+  alone could become infeasible below 4x turning_radius. That assumption turned out to be wrong for
+  this implementation (a rigorous search found no `(alpha, beta, d)` where all 4 CSC families fail
+  simultaneously) -- CCC (LRL/RLR) has since been added to `reeds_shepp.py` anyway, not because CSC
+  needed the fallback, but because CCC produces measurably shorter paths in the close-pose regime
+  (~30% of the time, sometimes ~2x shorter). Deliberately kept OFF for `HybridAStarPlanner` itself
+  (`include_ccc=False`) -- CCC's shorter paths are more curvature-aggressive, and enabling them
+  there measurably reopened Section 7's Pure-Pursuit-curvature-saturation finding on scenarios that
+  were previously safe. Full account in KNOWN_BUGS.md entry 5.
 
 ## 7. Control
 
@@ -709,6 +715,11 @@ not a strict target, since the real driver isn't assumed optimal).
   provides, free for non-commercial use but registration-gated (a manual data-request form, no
   anonymous download) — worth it once lane geometry precision actually matters, not required to
   build H3 in the first place.
-- **Full 2D intersection geometry**: H4's single-conflict-point model captures priority reasoning
-  but not actual crossing paths, turning movements, or more than two approaches at once — a real
-  4-way intersection simulation with lane-level geometry per approach.
+- **Turning movements at a real 2D intersection**: `control/intersection_geometry.py` +
+  `intersection2d_harness.py` (built after this section was first written -- see KNOWN_BUGS.md
+  entry 4) already give H4 real crossing paths, N-way approaches, and geometric collision
+  verification, running several unmodified `IntersectionNavigator` instances through one shared
+  intersection instead of H4's original single scripted `OtherVehicleStatus`. What's still missing
+  is turning movements (left-turn-yields-to-oncoming) -- every vehicle in that model goes straight
+  through its own approach; a turning vehicle needs a real curved connector path between two
+  approaches, not just another straight one.

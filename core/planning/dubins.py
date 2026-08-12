@@ -18,9 +18,17 @@ meters sideways into a parallel spot with no net turn) has no short same-directi
 solution -- shifting sideways while ending at the same heading via same-direction
 turns alone requires looping almost all the way around, whereas the
 opposite-direction families (LSR/RSL) produce the short "S-curve" shift directly.
-Triple-arc families (LRL, RLR) aren't implemented; they only matter when start/goal
-turning circles are closer together than 4x the turning radius, which doesn't arise
-in these scenarios (open lanes, well-separated poses).
+Triple-arc families (LRL, RLR) aren't implemented here. Note (added while investigating
+KNOWN_BUGS.md entry 5 for reeds_shepp.py, which shares this module's CSC solve): the
+"only matters when circles are closer than 4x turning_radius, otherwise CSC is
+infeasible" framing above turned out to be a mistaken premise for this specific
+4-family implementation -- a rigorous search found no `(alpha, beta, d)` where all 4
+CSC families are simultaneously infeasible, so CSC alone is apparently always
+sufficient for *feasibility*, at any distance. CCC can still produce a *shorter* path
+in the close-pose regime (which is why reeds_shepp.py added it for its own standalone
+planner), but that's a path-quality question, not a feasibility one -- left unimplemented
+here since DubinsPlanner is deliberately forward-only and out of KNOWN_BUGS entry 5's
+scope, not because the original infeasibility rationale still holds.
 
 Still does not avoid obstacles (ignores `obstacles`) and cannot reverse -- both
 addressed by Hybrid A*/Reeds-Shepp in M2 (see IMPLEMENTATION.md).

@@ -310,6 +310,21 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   scenario rather than just reasoning about it — held up cleanly, now pinned as a permanent
   regression test. Full account, including the measured before/after numbers for both phases, in
   DESIGN.md section 12's H5 entry.
+- **Real 2D intersection geometry for H4** (KNOWN_BUGS.md entry 4): `control/intersection_geometry.py`
+  (a real 2-road layout, right-hand-traffic lane offsets, a genuine conflict-zone box, `is_to_the_right`
+  derived from actual travel headings) + `intersection2d_harness.py` (runs any number of vehicles —
+  each still an unmodified `IntersectionNavigator` — through it, deriving every `OtherVehicleStatus`
+  from another vehicle's real simulated state instead of a script). Closes the "not full 2D... not
+  more than two approaches... no notion of actual crossing paths" gap; turning movements are
+  deliberately still deferred (see KNOWN_BUGS.md entry 4). **A real finding while building it**: the
+  geometric constants aren't independent of `VEHICLE_RADIUS` — the first version's
+  `conflict_half_width=4.0` against `lane_offset=3.0` let a vehicle waiting at its own stop line land
+  within collision range (2.97m apart, under the 5.0m two-radius threshold) of the perpendicular
+  through-lane, caught directly by a 3-way scenario test rather than reasoned about in the abstract;
+  fixed by widening the defaults (`conflict_half_width=7.0`, `stop_margin=1.5`) to the real minimum
+  clearance the geometry requires. Verified the collision check itself is a real safety net, not
+  vacuously true, by substituting a navigator that always claims right-of-way and confirming it gets
+  caught colliding on a pairing the compliant version already proved safe.
 - **M4 — Sensing & re-planning: done.** Sensor is a multi-beam array (`[-0.6, -0.3, 0.0, 0.3, 0.6]`
   rad) and braking already checked all beams, not just the front one. What was still open --
   wiring `PlannerNode` to re-plan (not just `ControllerNode` to brake) when `SensorNode` reports an

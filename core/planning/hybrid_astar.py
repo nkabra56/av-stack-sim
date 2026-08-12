@@ -17,6 +17,18 @@ the current search node straight to the goal) is what keeps obstacle-free scenar
 fast: with zero obstacles, the very first attempt -- made on the root node,
 unconditionally -- already succeeds, so the search degenerates to one
 reeds_shepp_path() call, the same O(1) cost as DubinsPlanner today.
+
+Every `reeds_shepp_length`/`reeds_shepp_path` call here deliberately passes
+`include_ccc=False`, even though `reeds_shepp.py` now supports the CCC (3-point-turn)
+family for its own standalone planner: CCC paths are shorter but more curvature-
+aggressive than CSC's, and since analytic expansion is attempted from every search node
+once it's close to the goal (not just the final connection), letting Hybrid A* use CCC
+measurably reopened Pure Pursuit's curvature-saturation collision risk (KNOWN_BUGS.md
+bug 1) on scenarios that were previously safe. This planner already "degrades
+gracefully" without CCC -- its own primitive search can compose the same 3-point-turn
+shape out of ordinary forward/reverse steps when it needs to -- so it doesn't need the
+family and the curvature-risk cost isn't worth paying here. See reeds_shepp.py's module
+docstring for the full account.
 """
 
 import heapq
@@ -124,7 +136,7 @@ class HybridAStarPlanner:
             segments.append(pts[1:])
             pose = tuple(pts[-1])
 
-        rs = reeds_shepp_path(pose, goal, turning_radius, step=self.output_step)
+        rs = reeds_shepp_path(pose, goal, turning_radius, step=self.output_step, include_ccc=False)
         segments.append(rs[1:])
         path = np.vstack(segments)
         path[:, 2] = wrap_angle(path[:, 2])
@@ -137,7 +149,7 @@ class HybridAStarPlanner:
 
         counter = itertools.count()
         root = _Node(x=start[0], y=start[1], theta=start[2], g=0.0, steer_idx=1, gear=0, parent=None)
-        root_h = reeds_shepp_length(start, goal, turning_radius)
+        root_h = reeds_shepp_length(start, goal, turning_radius, include_ccc=False)
         open_heap = [(root_h, next(counter), root)]
         best_g = {_grid_key(start[0], start[1], start[2], self.xy_resolution, self.theta_bins): 0.0}
 
@@ -165,7 +177,7 @@ class HybridAStarPlanner:
             ):
                 since_attempt = 0
                 candidate = reeds_shepp_path(
-                    (node.x, node.y, node.theta), goal, turning_radius, step=self.collision_check_step
+                    (node.x, node.y, node.theta), goal, turning_radius, step=self.collision_check_step, include_ccc=False
                 )
                 if candidate is not None and not _points_collide(candidate[:, :2], obstacles, clearance):
                     self.last_expansions = expansions  # exposed for tuning max_expansions, see IMPLEMENTATION.md
@@ -192,7 +204,7 @@ class HybridAStarPlanner:
                     nkey = _grid_key(nx, ny, ntheta, self.xy_resolution, self.theta_bins)
                     if new_g < best_g.get(nkey, float("inf")) - 1e-9:
                         best_g[nkey] = new_g
-                        h = reeds_shepp_length((nx, ny, ntheta), goal, turning_radius)
+                        h = reeds_shepp_length((nx, ny, ntheta), goal, turning_radius, include_ccc=False)
                         child = _Node(x=nx, y=ny, theta=ntheta, g=new_g, steer_idx=steer_idx, gear=gear, parent=node)
                         heapq.heappush(open_heap, (new_g + h, next(counter), child))
 
