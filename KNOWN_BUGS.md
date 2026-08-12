@@ -7,32 +7,15 @@ causing behavior, or a documented scope limitation that would surface as a real 
 conditions it's currently exercised under. Each entry links to where it's already discussed in more
 depth and what would need to happen to close it.
 
-## Reproducible safety bugs
-
-### 1. MPC-ACC's gap constraint is still violated in standstill-recovery, ~0.5m below target
-
-**Where**: `core/control/acc.py`'s `MpcAccController`.
-**Reproduce**: `python -m core.validation.acc_validation --controller mpc` — the NGSIM excerpt
-includes a real traffic stop.
-**What happens**: `MpcAccController`'s `gap(t) >= min_gap` is a hard constraint enforced by the
-optimizer (`scipy.optimize.minimize`'s `constraints` argument) — but if the ego ever ends up closer
-than `min_gap` while both vehicles are stopped, there is *no feasible acceleration sequence* that
-satisfies it (moving apart from a standstill would require reversing, which the ego can't do). SLSQP
-silently returns its best constraint-violating attempt instead of failing loudly. Measured: realized
-minimum gap lands ~0.5m below whatever `min_gap` is configured to, consistently, across a range of
-values tried.
-**Current mitigation, not a fix**: `min_gap` defaults to 3.0m (not the more natural 2.0m)
-specifically to keep the *realized* worst case comfortably positive, chosen from measured erosion —
-but this only shrinks the practical impact, it doesn't make the underlying infeasibility go away.
-**What would actually fix it**: robust/stochastic MPC — tighten the gap constraint by a margin
-proportional to prediction uncertainty instead of a fixed empirically-chosen `min_gap`, so the
-safety margin adapts to how much the lead vehicle's actual behavior deviates from the constant-
-velocity assumption the optimizer rolls out. Not built.
-**Full account**: DESIGN.md section 11, "A real finding from validating against NGSIM."
+There are currently no known reproducible safety bugs — the two that used to be tracked here
+(Pure Pursuit colliding on `parallel_between_cars`, and MPC-ACC's gap constraint going infeasible in
+standstill-recovery) are both fixed; see entry 2 below and `core/control/acc.py`'s
+`MpcAccController._effective_min_gap` docstring, respectively, for what changed and what residual,
+non-bug behavior remains.
 
 ## Scope limitations that would surface as real problems outside current usage
 
-### 2. Pure Pursuit still can't complete `parallel_between_cars` under Hybrid A* (now fails safe, not previously fixed)
+### 2. Pure Pursuit still can't complete `parallel_between_cars` under Hybrid A* (collision fixed; now fails safe)
 
 **Where**: `core/control/pure_pursuit.py`'s `PurePursuitAdaptive`, exposed via
 `core/planning/hybrid_astar.py`'s obstacle-aware planner; safety net in

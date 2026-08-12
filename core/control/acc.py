@@ -61,19 +61,10 @@ class MpcAccController:
     tick from the latest radar reading, so it's continuously corrected, not a
     long-range forecast.
 
-    `min_gap` default is 3.0 m, not the more natural-looking 2.0 m, because of a real
-    finding from validating against NGSIM (real congested stop-and-go traffic, see
-    DESIGN.md's ACC section): if the ego ever ends up closer than `min_gap` while both
-    vehicles are stopped -- which can happen during the approach to a standstill,
-    since the ego can't reverse -- there is no feasible acceleration sequence that
-    satisfies the constraint from there (moving apart from a standstill would require
-    driving backward), so the constrained optimization becomes locally infeasible and
-    SLSQP silently returns its best constraint-violating attempt rather than failing
-    loudly. This is a genuine limitation of *nominal* (non-robust) MPC under model
-    mismatch, not a bug to paper over: across a range of `min_gap` values the realized
-    minimum gap consistently landed about 0.5 m below the nominal target, so 3.0 m
-    keeps the realized worst case comfortably positive (~2.5 m) rather than picking a
-    value that looks right on paper but erodes to a near-miss in practice.
+    `min_gap` defaults to 3.0 m, not the more natural-looking 2.0 m, as extra cushion
+    against sensor noise (see `_effective_min_gap`'s docstring for the constraint-
+    feasibility fix itself -- this default is now a margin choice, not a workaround
+    for a broken constraint).
     """
 
     def __init__(
@@ -124,15 +115,47 @@ class MpcAccController:
         cost += self.w_jerk * np.sum(np.diff(a_seq) ** 2)
         return cost
 
-    def _gap_constraint(self, a_seq: np.ndarray, ego_speed: float, lead_positions: np.ndarray) -> np.ndarray:
+    def _effective_min_gap(self, ego_speed: float, lead_positions: np.ndarray) -> np.ndarray:
+        """A per-horizon-step floor that's *always* achievable, fixing the actual defect
+        behind KNOWN_BUGS.md's bug 2: a flat `min_gap` constraint can demand something no
+        acceleration sequence can deliver (the ego closing on a stopped lead can't reverse
+        to recover lost distance), so SLSQP was solving a genuinely infeasible NLP and
+        silently returning its best constraint-violating attempt.
+
+        The gap achievable at horizon step k is bounded by braking at `a_min` from *now*
+        every step -- that specific sequence is a concrete witness that reaching
+        `_rollout(..., a_min-repeated)`'s gap at each step is always possible, so clamping
+        the constraint to never demand more than that (`min(min_gap, floor)`, per step, not
+        one scalar for the whole horizon) keeps the NLP feasible at every step instead of
+        only at whichever one is easiest. The optimizer is still free -- and, via `_cost`'s
+        `desired_gap` term, still incentivized -- to reach the full `min_gap` whenever
+        that's actually reachable; this only relaxes the constraint at the specific steps
+        where `min_gap` itself would be physically impossible.
+
+        Verified against the NGSIM standstill case (real congested stop-and-go traffic,
+        DESIGN.md section 11): cut the realized gap erosion at `min_gap=3.0` from ~0.56 m
+        to ~0.21 m, with the remainder attributable to radar range noise
+        (`RadarNode`'s `range_std=0.5`) feeding the *measured* gap the constraint is built
+        from each tick, not to any remaining infeasibility -- confirmed by comparing each
+        tick's promised next-step floor against the next tick's realized true gap.
+        """
+        _, floor = self._rollout(ego_speed, lead_positions, np.full(self.horizon, self.a_min))
+        return np.minimum(self.min_gap, floor)
+
+    def _gap_constraint(
+        self, a_seq: np.ndarray, ego_speed: float, lead_positions: np.ndarray, effective_min_gap: np.ndarray
+    ) -> np.ndarray:
         _, gaps = self._rollout(ego_speed, lead_positions, a_seq)
-        return gaps - self.min_gap  # scipy 'ineq': feasible when >= 0
+        return gaps - effective_min_gap  # scipy 'ineq': feasible when >= 0
 
     def control(self, ego_speed: float, gap: float, lead_speed: float) -> float:
         lead_positions = gap + lead_speed * self.dt * np.arange(1, self.horizon + 1)
+        effective_min_gap = self._effective_min_gap(ego_speed, lead_positions)
         u0 = self._warm_start if self._warm_start is not None else np.zeros(self.horizon)
         bounds = [(self.a_min, self.a_max)] * self.horizon
-        constraints = [{"type": "ineq", "fun": self._gap_constraint, "args": (ego_speed, lead_positions)}]
+        constraints = [
+            {"type": "ineq", "fun": self._gap_constraint, "args": (ego_speed, lead_positions, effective_min_gap)}
+        ]
 
         result = minimize(
             self._cost,

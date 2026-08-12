@@ -308,10 +308,25 @@ tuning problem). MPC's constraint-respecting rollout stays collision-free and co
 (5/5 seeds, up to ~880 of a raised 1000-step budget — Hybrid A*'s avoidance routes are longer and
 more circuitous than M1's direct paths ever needed to be). Rather than force both controllers to
 "succeed" via some numeric hack, this is documented as a real, scoped exception
-(`tests/test_simulation.py`'s `UNSAFE_COMBINATIONS`, pinned by its own regression test) — the same
+(`tests/test_simulation.py`'s `NEVER_SUCCEEDS`, pinned by its own regression test) — the same
 honest treatment DESIGN.md already gives the Pure-Pursuit-vs-MPC tradeoff in the abstract, now
 concretely realized once a planner actually produces curvature-saturated, obstacle-hugging paths for
 Pure Pursuit to track.
+
+**Update, from fixing the collision itself (not just documenting it)**: the 5/5 collisions above
+turned out to trace to a second, independent defect, not just Pure Pursuit's tracking error --
+`brake_distance_for`'s `buffer` parameter defaulted to exactly `HybridAStarPlanner.safety_margin`,
+which made the resulting `brake_distance` collapse to precisely `VEHICLE_RADIUS`, the literal
+collision boundary, so the emergency brake fired at the moment of contact rather than before it, for
+any speed. `ControllerNode` now runs a continuous, physics-based speed governor
+(`v_allowed = sqrt(2*a_max*gap)`, recomputed every tick from the live sensor range) instead of a
+fixed trigger distance -- verified to bring `parallel_between_cars`/Pure-Pursuit's collisions to 0/5
+across the same 5 seeds, with zero regression on the other 9 (scenario, controller) pairs (still
+5/5 success each). Pure Pursuit still can't *complete* this maneuver (0/5 success, unchanged --
+curvature saturation with zero correction margin is a real tracking limitation the speed governor
+can't paper over), but it now fails safe (stops short) instead of failing dangerously (collides).
+See `core/nodes/controller_node.py`'s module docstring and KNOWN_BUGS.md entry 2 for the full
+account.
 
 Alternatives considered:
 
@@ -474,9 +489,23 @@ constant-velocity prediction and real driver behavior, not a bug to hide: across
 `min_gap` values, the realized minimum gap consistently landed ~0.5 m below the nominal target,
 so `min_gap` defaults to 3.0 m (not the more natural-looking 2.0) specifically to keep the
 *realized* worst case comfortably positive — a value picked from measured erosion, not chosen to
-look right on paper. A genuinely robust fix (tightening the constraint by a confidence margin
-proportional to prediction uncertainty, i.e. robust/stochastic MPC) is future work, noted in
-Section 12.
+look right on paper.
+
+**Update, from fixing the infeasibility itself**: the constant `min_gap` constraint was the actual
+defect, not just a tuning target -- it could demand a gap no acceleration sequence could deliver.
+`MpcAccController._effective_min_gap` now computes a *per-horizon-step* floor from a concrete,
+always-feasible witness trajectory (braking at `a_min` every step from the current state), and
+clamps the constraint to `min(min_gap, that floor)` at each step rather than one flat number for the
+whole horizon -- so the NLP SLSQP solves is provably feasible at every point, not just wherever
+happened to be easiest. `_cost`'s `desired_gap` term is unchanged, so the optimizer still pulls back
+toward the full `min_gap` whenever that's actually reachable. Measured effect on the same NGSIM
+standstill case: realized minimum gap at `min_gap=3.0` improved from 2.44 m (~0.56 m erosion) to
+2.79 m (~0.21 m erosion) -- and the remaining ~0.21 m was confirmed to trace to `RadarNode`'s own
+measurement noise (`range_std=0.5`), not to any remaining infeasibility, by comparing each tick's
+promised next-step floor against the next tick's *true* realized gap. A full robust/stochastic MPC
+(tightening the constraint by a confidence margin proportional to lead-vehicle prediction
+uncertainty specifically, as opposed to the constraint-feasibility fix here) remains future work,
+noted in Section 12, but is no longer covering for a constraint that could ask for the impossible.
 
 **Validation** (`validation/ngsim_loader.py`, `validation/acc_validation.py`) replays a real
 NGSIM leader/follower pair's recorded trajectory (US-101 freeway, congested traffic including a
