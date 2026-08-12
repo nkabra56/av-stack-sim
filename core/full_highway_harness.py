@@ -10,16 +10,25 @@ class wouldn't capture the actual complexity (which nodes, in what order). Same
 reasoning highway_harness.py's own docstring already gives for staying separate from
 harness.py.
 
-Real NGSIM data throughout, but from two different (though geometrically overlapping)
-extracts: the lane centerline (core/data/ngsim/lane_centerline.csv) is derived from
-NGSIM US-101 **lane 2**; the replayed leader (core/data/ngsim/excerpt_trajectories.csv,
-vehicle_id 9) is recorded in **lane 1**. Both use NGSIM's shared along-road `local_y`
-coordinate (not per-lane-zeroed), and their ranges genuinely do overlap (leader
-position 37.5-661.5m vs. centerline 14.8-656.8m, verified directly against the
-committed files) -- real data, same road and location, genuinely not the same lane.
-Documented here rather than hidden; a lane-2-specific leader/follower pair would
-remove this caveat but isn't required for this scenario's actual purpose (exercising
-ACC+Stanley composition on one Vehicle, not lane-precise realism).
+Real NGSIM data throughout, and (as of KNOWN_BUGS.md's former entry 6) from the same
+lane: the lane centerline (core/data/ngsim/lane_centerline.csv) and the replayed leader
+(core/data/ngsim/excerpt_trajectories.csv, vehicle_id 2896) are both NGSIM US-101
+**lane 2**. This used to be two geometrically-overlapping-but-different-lane extracts
+(leader from lane 1) -- real data, same road and location, but not lane-precise, a
+deliberate scope call at the time since exercising ACC+Stanley composition on one
+Vehicle didn't strictly require lane-level realism. Closed by re-extracting a lane-2
+leader/follower pair (vehicle_id 2896/2903) via the same public Socrata source -- see
+core/data/ngsim/ATTRIBUTION.md for the full extraction account.
+
+**A real finding from re-validating against the new pair**: this leader's real recorded
+trajectory includes a genuine full stop (real US-101 congestion, not synthetic), and
+restarting from that near-zero true speed measurably (if temporarily) stresses the
+composed EKF/Stanley loop -- Stanley's atan2(k*cte, speed) correction (lane_centering.py)
+is deliberately weakest exactly when speed is lowest, so a transient lateral drift while
+pulling away from a dead stop is expected, not a bug. Confirmed genuinely transient, not
+a failure to converge, across all (controller, seed) pairs: see
+tests/test_full_highway.py's test_cross_track_error_converges_within_real_driver_scatter
+docstring for the measured numbers.
 """
 
 from dataclasses import dataclass

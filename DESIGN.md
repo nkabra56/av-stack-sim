@@ -624,11 +624,17 @@ not a strict target, since the real driver isn't assumed optimal).
   gap/stop-line position on a curved road as arc-length along the centerline rather than raw
   Euclidean x, needed once the ego's `(x, y)` genuinely leaves the x-axis under real steering.
 
-  **Real data, two different NGSIM extracts**: the lane centerline is NGSIM US-101 **lane 2**; the
-  replayed leader (H1's own committed excerpt) is recorded in **lane 1** — same road and location,
-  not the same lane, verified directly against the committed files and documented in
-  `full_highway_harness.py`'s docstring rather than hidden. Both use NGSIM's shared along-road
-  `local_y` coordinate, and the ranges do overlap (leader 37.5-661.5m vs. centerline 14.8-656.8m).
+  **Real data, now the same NGSIM lane** (closed KNOWN_BUGS.md's former entry 6): the lane
+  centerline and the replayed leader are both NGSIM US-101 **lane 2**. This used to be two
+  geometrically-overlapping-but-different-lane extracts (leader recorded in lane 1) — documented
+  rather than hidden, but not lane-precise. Closed by re-extracting a lane-2 leader/follower pair
+  (`vehicle_id` 2896/2903, same public Socrata source, same real full-stop character as the
+  original) — see `core/data/ngsim/ATTRIBUTION.md`. **A real finding from re-validating against
+  it**: this leader's genuine recorded full stop measurably (if temporarily) stresses the composed
+  EKF/Stanley loop during the low-speed restart — Stanley's `atan2(k*cte, speed)` correction is
+  weakest exactly when speed is lowest, by design — confirmed as a real, understood, converging
+  transient (not a failure to converge) across every (controller, seed) pair tried; see
+  `tests/test_full_highway.py`'s cross-track convergence test.
 
   **Three real bugs found building this, all in the H2 EKF, all invisible until now for the same
   reason**: H1's straight-line-only use kept `delta` at exactly 0 forever, which zeroed out every
@@ -672,6 +678,13 @@ not a strict target, since the real driver isn't assumed optimal).
   NGSIM data coherence, cross-track-error plausibility, gap plausibility, determinism, and pins the
   H2 fix with a direct regression test (feed a real nonzero steering reading, assert the filter's
   heading actually moves — impossible if `delta` were still hardcoded to 0).
+
+  **Re-measured against the lane-2 leader** (once the lane-1-vs-lane-2 mismatch above was closed):
+  RMS 0.22-0.35m across seeds, min gap ~1.78m — both figures shifted somewhat (a genuinely
+  different real leader vehicle, not the same trajectory replayed on a different lane), but the
+  qualitative result is unchanged: still safely under the 0.46m bar, still never exceeds its
+  initial offset, still collision-free. The 0.27-0.33m/~2.2m figures above are the original
+  (lane-1-leader) measurement, left as historical record rather than silently overwritten.
 - **Full closed-loop highway drive (H5), Phase B — H4 routing: done.** `IntersectionNavigator`
   layered on top of Phase A by composing its stop-line/right-of-way accel with ACC's real-lead-
   vehicle accel via `nodes/longitudinal_arbiter_node.py`'s `LongitudinalArbiterNode`: `min()` over

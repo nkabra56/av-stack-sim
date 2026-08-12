@@ -24,8 +24,11 @@ import numpy as np
 
 FEET_TO_METERS = 0.3048
 DEFAULT_EXCERPT_PATH = Path(__file__).parent.parent / "data" / "ngsim" / "excerpt_trajectories.csv"
-DEFAULT_LEADER_ID = 9
-DEFAULT_FOLLOWER_ID = 12
+# vehicle_id 2896 (leader) / 2903 (follower), NGSIM US-101 lane 2 -- re-extracted to close
+# KNOWN_BUGS.md entry 6 (the excerpt used to be lane 1, geometrically overlapping but not
+# lane-coherent with lane_centerline.csv below, which is lane 2). See ATTRIBUTION.md.
+DEFAULT_LEADER_ID = 2896
+DEFAULT_FOLLOWER_ID = 2903
 DEFAULT_LANE_CENTERLINE_PATH = Path(__file__).parent.parent / "data" / "ngsim" / "lane_centerline.csv"
 
 
