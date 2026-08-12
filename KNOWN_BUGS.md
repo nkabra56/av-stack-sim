@@ -50,18 +50,36 @@ described as open, now with the collision risk removed either way.
 **Full account**: DESIGN.md section 6's M2 entry, "second real finding" paragraph;
 `core/nodes/controller_node.py`'s module docstring for the speed-governor fix.
 
-### 3. No re-planning when a sensed obstacle isn't on the current path (parking, M4)
+### 3. Re-planning exists now, but a re-plan can still land on a route the speed governor won't drive
 
-**Where**: `core/nodes/controller_node.py` (braking) / `core/nodes/planner_node.py` (plans once,
-never again).
-**What happens**: `ControllerNode` already checks all 5 ultrasonic beams and brakes on any close
-reading, but `PlannerNode` never re-plans around what triggered the brake. In every scenario this
-project currently ships, the environment is static and fully known to the planner up front, so this
-never actually bites — but a scenario with a genuinely unplanned/dynamic obstacle would make the
-vehicle brake and stay stopped indefinitely rather than routing around it.
-**What would close it**: wire `PlannerNode` to re-plan (not just `ControllerNode` to brake) when
-`SensorNode` reports an obstacle the current path didn't account for. Explicitly called out as open
-in IMPLEMENTATION.md's M4 entry; not started.
+**Where**: `core/nodes/controller_node.py` (stall detection -> `replan_request`) /
+`core/nodes/planner_node.py` (re-plans against the live obstacle list on that signal).
+**Status**: the original bug — `PlannerNode` plans once and never again, so `ControllerNode`
+braking on an unplanned obstacle just left the vehicle stopped indefinitely — is fixed. If
+`ControllerNode`'s speed governor (KNOWN_BUGS.md entry 2's fix) stays binding for `STALL_TICKS`
+consecutive ticks, it publishes `replan_request`; `PlannerNode` re-plans from the latest pose
+estimate against `environment.obstacles` *read live*, so an obstacle added to that list mid-run
+(invisible to the original plan) is fully visible to the re-plan. Verified directly
+(`tests/test_replanning.py`): a re-plan triggered this way produces a genuinely different path that
+clears a newly-appeared obstacle by a real margin, capped at `max_replans` attempts, and a planner
+that raises (no route exists) is handled without crashing the simulation.
+**What's still open**: in one closed-loop configuration built while testing this
+(`test_replanning_produces_a_materially_different_obstacle_avoiding_path`), the vehicle stalls,
+triggers a correct re-plan, gets a valid detour back — and immediately stalls again at the *start*
+of that detour, because Hybrid A* only guarantees its own `safety_margin` (0.15m) of clearance,
+tighter than `ControllerNode`'s `stopping_buffer` (0.5m, tuned for entry 2's slower-approach
+scenario). The governor doesn't know the tighter clearance belongs to a deliberately-computed route
+rather than raw unplanned proximity, so it throttles the same way either time. Not a safety bug (the
+vehicle still never collides — see `test_never_collides_with_a_dynamically_appearing_obstacle`) and
+not the re-planning gap this entry originally tracked, but a real, separate wrinkle: a fast,
+sudden-appearance obstacle can leave no `stopping_buffer` value that both (a) allows enough room to
+find a detour from the stall point and (b) doesn't also throttle progress along that detour once
+found.
+**What would close it**: let the governor distinguish "the planner deliberately routed this close"
+from "raw unplanned proximity" -- e.g. relax `stopping_buffer` toward the planner's own
+`safety_margin` while tracking a path that's already known to respect it, the same distinction
+`hybrid_astar.brake_distance_for` used to try to make statically (see entry 1's history) before it
+turned out to need to be dynamic, not fixed. Not attempted yet.
 
 ### 4. H4's intersection model is a single conflict point, not real 2D geometry
 

@@ -77,6 +77,13 @@ class PathMsg:
 
 
 @dataclass(frozen=True)
+class ReplanRequestMsg:
+    """Published by ControllerNode when the speed governor has been binding for long
+    enough to look like a genuine stall rather than a momentary slowdown -- see
+    ControllerNode's docstring and PlannerNode's `_on_replan_request`."""
+
+
+@dataclass(frozen=True)
 class ControlCmdMsg:
     v: float
     delta: float

@@ -12,6 +12,7 @@ available. Success/collision are evaluated against true_state only -- the harnes
 the one place, besides SensorNode, allowed to see ground truth.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -59,6 +60,7 @@ class ParkingHarness:
         # only ever knows its NOISY pose estimate, not ground truth, so "close enough to
         # call it parked" has to allow for realistic estimation error, not just controller error
         stopping_buffer: float = 0.5,  # see ControllerNode._safe_speed's docstring
+        max_replans: int = 3,  # see PlannerNode's docstring
     ):
         self.environment = environment
         self.tol = tol
@@ -82,7 +84,7 @@ class ParkingHarness:
             ),
         )
         self.estimator_node = EstimatorNode(self.bus, ekf, environment)
-        self.planner_node = PlannerNode(self.bus, planner, environment, vehicle.turning_radius)
+        self.planner_node = PlannerNode(self.bus, planner, environment, vehicle.turning_radius, max_replans=max_replans)
         self.controller_node = ControllerNode(self.bus, controller, a_max=a_max, stopping_buffer=stopping_buffer)
 
         # A controller with its own internal rollout model (e.g. MPCController) has to predict
@@ -114,14 +116,23 @@ class ParkingHarness:
                 return True
         return False
 
-    def run(self, max_steps: int = 500) -> SimulationResult:
+    def run(self, max_steps: int = 500, on_tick: Callable[[int], None] | None = None) -> SimulationResult:
+        """`on_tick(tick)`, if given, runs before each tick's nodes step -- its only use
+        so far is tests exercising re-planning (KNOWN_BUGS.md bug 3): mutating
+        `self.environment.obstacles` mid-run to simulate an obstacle that wasn't there
+        when `PlannerNode` made its first (and, for every scenario this project ships,
+        only) plan. Every node reads `self.environment` live, not a snapshot, so this is
+        the only hook needed -- no separate "inject an obstacle" API on the harness
+        itself."""
         true_history: list[tuple[float, float, float]] = []
         est_history: list[tuple[float, float, float]] = []
         cov_history: list[np.ndarray] = []
         controls: list[tuple[float, float]] = []
         collision = False
 
-        for _ in range(max_steps):
+        for tick in range(max_steps):
+            if on_tick is not None:
+                on_tick(tick)
             self.vehicle_node.step()
             self.sensor_node.step()
             self.controller_node.step()

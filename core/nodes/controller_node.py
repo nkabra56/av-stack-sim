@@ -10,6 +10,19 @@ Braking on close-range obstacle detection lives here (moved from the old
 ParkingSimulation loop): it's a control-layer safety decision, made from the sensor's
 obstacle_ranges, independent of which path-tracking law is in use underneath.
 
+**Stall detection -> re-plan request** (see KNOWN_BUGS.md bug 3 / IMPLEMENTATION.md's M4
+entry): the speed governor below is a safety backstop, not a routing decision -- if it
+ends up binding for a sustained stretch (an obstacle close enough, for long enough, that
+the vehicle can't make real progress), that's the same signal a real AV stack would use
+to trigger re-planning, not just sit there. Every `STALL_TICKS`-th consecutive governed-
+near-zero tick publishes a `replan_request` -- not just the first: a re-plan can itself
+fail to produce a drivable-at-speed route (e.g. it finds a technically-clear path that
+still passes closer to the obstacle than `stopping_buffer` allows, so the governor pins
+speed near zero again right where the new path starts -- a real, separate residual noted
+in KNOWN_BUGS.md bug 3), and a stall that never recovers still deserves periodic retries,
+not exactly one attempt ever. The counter resets the moment the vehicle moves again, so
+recovering and re-stalling later also asks again after its own `STALL_TICKS`.
+
 **Speed governor, not a binary brake** (see KNOWN_BUGS.md's bug 1 for the finding that
 motivated this): a fixed "brake within X meters" cutoff has no notion of how fast the
 vehicle is actually going, so a distance picked to sit below a planner's own intentional
@@ -29,7 +42,12 @@ import math
 from core.environment import VEHICLE_RADIUS
 from core.interfaces import Controller
 from core.messaging.bus import Bus
-from core.messaging.messages import ControlCmdMsg, ObstacleRangeMsg, PathMsg, PoseEstimateMsg
+from core.messaging.messages import ControlCmdMsg, ObstacleRangeMsg, PathMsg, PoseEstimateMsg, ReplanRequestMsg
+
+STALL_SPEED = 0.1  # m/s -- below this, the governor is treated as "essentially stopping" the vehicle
+STALL_TICKS = 15  # ~1.5s at the harness's dt=0.1 -- long enough that this is a real stall, not the
+# governor's ordinary momentary tightening as the vehicle brushes past an intentionally-close
+# obstacle on a valid path.
 
 
 class ControllerNode:
@@ -37,6 +55,7 @@ class ControllerNode:
         self.bus = bus
         self.controller = controller
         self.a_max = a_max
+        self._stall_ticks = 0
         # Extra cushion beyond the exact kinematic stopping distance, to absorb the one-tick
         # sense-decide-act latency (obstacle_ranges is read at tick t, but the resulting slower
         # command isn't actually applied by VehicleNode until tick t+1) and the fact that
@@ -82,5 +101,12 @@ class ControllerNode:
         v, delta = self.controller.control(self._pose_estimate, self._path.path)
         v_safe = self._safe_speed()
         v = max(-v_safe, min(v_safe, v))
+
+        if v_safe < STALL_SPEED:
+            self._stall_ticks += 1
+            if self._stall_ticks % STALL_TICKS == 0:
+                self.bus.publish("replan_request", ReplanRequestMsg())
+        else:
+            self._stall_ticks = 0
 
         self.bus.publish("control_cmd", ControlCmdMsg(v, delta))

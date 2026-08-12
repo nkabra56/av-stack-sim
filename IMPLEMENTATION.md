@@ -2,13 +2,13 @@
 
 This is the build spec for the architecture described in [DESIGN.md](DESIGN.md). Parking-mode
 milestones M1 (correct baseline), the control half of M3 (MPC), ME (state estimation + pub/sub
-architecture), MV (real-data EKF validation against KITTI), and **M2 (Hybrid A* + Reeds-Shepp
-obstacle-aware planning)** are done. All four highway-mode milestones — **H1 (adaptive cruise
-control)**, **H2 (fused ego speed via an extended EKF)**, **H3 (lane centering)**, and **H4
-(intersection navigation)** — are also done, each originally validated standalone, and **H5 (the
-full closed-loop highway drive, H1+H2+H3+H4 all composed onto one Vehicle) is now done too**, built
-in two deliberately sequenced phases — see DESIGN.md section 12's H5 entry. The highway side is
-now fully integrated; on the parking side, M4 (sensing & re-planning) and M5/M6 (visualization
+architecture), MV (real-data EKF validation against KITTI), **M2 (Hybrid A* + Reeds-Shepp
+obstacle-aware planning)**, and **M4 (sensing & re-planning)** are done. All four highway-mode
+milestones — **H1 (adaptive cruise control)**, **H2 (fused ego speed via an extended EKF)**, **H3
+(lane centering)**, and **H4 (intersection navigation)** — are also done, each originally validated
+standalone, and **H5 (the full closed-loop highway drive, H1+H2+H3+H4 all composed onto one
+Vehicle) is now done too**, built in two deliberately sequenced phases — see DESIGN.md section 12's
+H5 entry. The highway side is now fully integrated; on the parking side, M5/M6 (visualization
 polish, CI) are what's next — see Section 3 for the full roadmap.
 
 ## 1. Directory structure
@@ -310,10 +310,21 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   scenario rather than just reasoning about it — held up cleanly, now pinned as a permanent
   regression test. Full account, including the measured before/after numbers for both phases, in
   DESIGN.md section 12's H5 entry.
-- **M4 — Sensing & re-planning**: sensor is already a multi-beam array (`[-0.6, -0.3, 0.0, 0.3,
-  0.6]` rad) and braking already checks all beams, not just the front one. Still open: wiring
-  `PlannerNode` to re-plan (not just `ControllerNode` to brake) when `SensorNode` reports an
-  obstacle the current path didn't account for (needs M2's planner to re-plan into).
+- **M4 — Sensing & re-planning: done.** Sensor is a multi-beam array (`[-0.6, -0.3, 0.0, 0.3, 0.6]`
+  rad) and braking already checked all beams, not just the front one. What was still open --
+  wiring `PlannerNode` to re-plan (not just `ControllerNode` to brake) when `SensorNode` reports an
+  obstacle the current path didn't account for -- is now built: `ControllerNode` publishes
+  `replan_request` once its speed governor (KNOWN_BUGS.md entry 2's fix) has been binding for
+  `STALL_TICKS` consecutive ticks, and `PlannerNode` re-plans from the latest pose estimate against
+  `environment.obstacles` read live (not a snapshot from the first plan), capped at `max_replans`
+  attempts. Verified directly (`tests/test_replanning.py`, since every scenario this project ships
+  is static and fully known up front, so nothing exercises this in the 5 shipped scenarios
+  themselves): an obstacle dropped into the environment mid-run, invisible to the original plan, is
+  fully visible to and routed around by a re-plan, with a real measured clearance margin, not just
+  "didn't crash." A real, separate residual found while building this -- a re-plan's resulting
+  route can still be tight enough that `ControllerNode`'s fixed `stopping_buffer` throttles
+  progress along it too -- is tracked as KNOWN_BUGS.md's (renumbered) entry 3, not treated as
+  unresolved M4 scope.
 - **M5 — Visualization polish**: `visualization/animate.py` now shows true vs. estimated
   trajectory, a covariance ellipse, and the planned path (landed as part of ME, since the whole
   point of adding an estimator is visible directly in that comparison). Still open: a genuinely
