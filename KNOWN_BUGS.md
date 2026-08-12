@@ -50,67 +50,133 @@ described as open, now with the collision risk removed either way.
 **Full account**: DESIGN.md section 6's M2 entry, "second real finding" paragraph;
 `core/nodes/controller_node.py`'s module docstring for the speed-governor fix.
 
-### 3. Re-planning exists now, but a re-plan can still land on a route the speed governor won't drive
+### 3. Re-planning exists now, and a re-plan no longer gets stuck at the start of its own detour
 
-**Where**: `core/nodes/controller_node.py` (stall detection -> `replan_request`) /
-`core/nodes/planner_node.py` (re-plans against the live obstacle list on that signal).
-**Status**: the original bug — `PlannerNode` plans once and never again, so `ControllerNode`
-braking on an unplanned obstacle just left the vehicle stopped indefinitely — is fixed. If
-`ControllerNode`'s speed governor (KNOWN_BUGS.md entry 2's fix) stays binding for `STALL_TICKS`
-consecutive ticks, it publishes `replan_request`; `PlannerNode` re-plans from the latest pose
-estimate against `environment.obstacles` *read live*, so an obstacle added to that list mid-run
-(invisible to the original plan) is fully visible to the re-plan. Verified directly
-(`tests/test_replanning.py`): a re-plan triggered this way produces a genuinely different path that
-clears a newly-appeared obstacle by a real margin, capped at `max_replans` attempts, and a planner
-that raises (no route exists) is handled without crashing the simulation.
-**What's still open**: in one closed-loop configuration built while testing this
-(`test_replanning_produces_a_materially_different_obstacle_avoiding_path`), the vehicle stalls,
-triggers a correct re-plan, gets a valid detour back — and immediately stalls again at the *start*
-of that detour, because Hybrid A* only guarantees its own `safety_margin` (0.15m) of clearance,
+**Where**: `core/nodes/controller_node.py` (stall detection -> `replan_request`, tracking-aware
+buffer) / `core/nodes/planner_node.py` (re-plans against the live obstacle list) / `core/harness.py`
+(derives the tracked buffer from the active planner).
+**Status**: closed. The original bug — `PlannerNode` plans once and never again, so `ControllerNode`
+braking on an unplanned obstacle just left the vehicle stopped indefinitely — was fixed first (see
+above); a real residual then showed up while testing that fix: in
+`test_replanning_produces_a_materially_different_obstacle_avoiding_path`, the vehicle would stall,
+trigger a correct re-plan, get a valid detour back — and immediately stall again at the *start* of
+that detour, because Hybrid A* only guarantees its own `safety_margin` (0.15m) of clearance,
 tighter than `ControllerNode`'s `stopping_buffer` (0.5m, tuned for entry 2's slower-approach
-scenario). The governor doesn't know the tighter clearance belongs to a deliberately-computed route
-rather than raw unplanned proximity, so it throttles the same way either time. Not a safety bug (the
-vehicle still never collides — see `test_never_collides_with_a_dynamically_appearing_obstacle`) and
-not the re-planning gap this entry originally tracked, but a real, separate wrinkle: a fast,
-sudden-appearance obstacle can leave no `stopping_buffer` value that both (a) allows enough room to
-find a detour from the stall point and (b) doesn't also throttle progress along that detour once
-found.
-**What would close it**: let the governor distinguish "the planner deliberately routed this close"
-from "raw unplanned proximity" -- e.g. relax `stopping_buffer` toward the planner's own
-`safety_margin` while tracking a path that's already known to respect it, the same distinction
-`hybrid_astar.brake_distance_for` used to try to make statically (see entry 1's history) before it
-turned out to need to be dynamic, not fixed. Not attempted yet.
+scenario). The governor had no way to tell "the planner deliberately routed this close" apart from
+"raw unplanned proximity," so it throttled both the same way.
+**What closed it**: `ControllerNode` now computes live cross-track distance to the current path
+each tick and uses a much smaller `tracked_stopping_buffer` whenever that distance is below
+`tracking_threshold` -- i.e. the vehicle is actually tracking the plan, not drifting off it. Above
+the threshold, it falls back to the original, fully conservative `stopping_buffer`, so entry 2's
+exact failure mode (Pure Pursuit's cross-track error growing past ~0.66m under curvature
+saturation) still gets the full margin it needs. `ParkingHarness` derives `tracked_stopping_buffer`
+from `getattr(planner, "safety_margin", None)` -- planners with no exposed clearance guarantee
+(Dubins/ReedsShepp, both obstacle-blind) automatically get `None` and keep the fully conservative
+buffer unconditionally, since they never earned a smaller one.
+**Real finding from a real parameter sweep** (not picked by eye): the naive-sounding threshold
+(0.3m, "well under entry 2's ~0.66m collision-point error") *reopened* entry 2's collision outright
+-- by the time cross-track error reaches even 0.1-0.15m, the vehicle is already well into the
+dangerous divergence, not still safely on-plan. The threshold had to be tight enough that the
+tracking/not-tracking classification is essentially never wrong, not just usually right. Swept
+`tracking_threshold` x `tracked_buffer_extra` (the margin added on top of the planner's raw
+`safety_margin`) jointly against both entry 2's regression scenario and this entry's own detour
+scenario, across 5 seeds each: `tracking_threshold=0.03` (3cm) paired with `tracked_buffer_extra=0.3`
+was the smallest/safest combination found -- 0/5 collisions on both scenarios, 5/5 full recoveries
+(the vehicle now actually reaches the goal, not just gets an unusable detour) on this entry's
+scenario. Pinned by `tests/test_replanning.py::test_replanning_recovery_holds_across_seeds` and
+direct unit coverage of the buffer-selection logic itself in `tests/test_controller_node.py`.
+**`tracked_buffer_extra` revised to 0.4, from a later code-review finding**: `_effective_buffer`'s
+cross-track measurement used to be nearest-*waypoint* distance, which over-estimates true
+cross-track error by up to half Hybrid A*'s waypoint spacing (~0.05m against a 3cm threshold --
+not a large margin). Fixing it to true perpendicular-distance-to-path-segment (strictly more
+accurate, and always <= the old measurement) classifies more ticks as "tracking," using the
+smaller buffer more often -- which shifted this constant's own tuned operating point enough that
+a wider 25-seed re-sweep (the original tuning only checked 5) found `tracked_buffer_extra=0.3`
+now producing 1/10 real collisions once the seed range widened, invisible at 5 seeds; 0.2 fails
+outright (4/5 collisions), confirming this constant sits right at a real safety cliff rather than
+a comfortable margin above one. `0.4` held 0/25 collisions with 23/25 full completions across
+seeds 1-25 (the 2 non-completions are the max_replans residual described above, not unsafe) and
+is the current default.
 
-### 4. H4's intersection model has no notion of turning movements
+### 4. H4's intersection model has no notion of turning movements — closed
 
 **Where**: `core/control/intersection_geometry.py` / `core/intersection2d_harness.py`.
-**Status**: the original gap — no real crossing paths, no way to check more than two approaches, no
-geometric verification that right-of-way reasoning actually prevents a collision — is closed.
-`intersection_geometry.py` gives the intersection a real 2D layout (perpendicular roads, right-hand-
-traffic lane offsets, a genuine conflict-zone box, `is_to_the_right` derived from actual travel
-headings instead of a hand-set flag); `intersection2d_harness.py` runs any number of real vehicles
-— each still just an unmodified `IntersectionNavigator`, the same reuse principle H4 always used for
-`IDMController` — through it, deriving every vehicle's view of the others from real simulated state
-instead of a script, and checking actual circle-to-circle proximity, not just arrival-order
-bookkeeping. Verified directly (`tests/test_intersection_geometry.py`): 2-, 3-, and 4-way scenarios
-all resolve with zero real collisions and correct proceed order, parallel (non-crossing) approaches
-are recognized as such, and — to confirm the check isn't vacuous — a deliberately non-compliant
-navigator is caught colliding on a pairing the compliant version already proved safe. A real,
-physical finding along the way: the geometric constants (conflict-zone size, lane offset, stop
-margin) aren't independent of `VEHICLE_RADIUS` — an under-sized intersection can put a vehicle
-waiting at its own stop line within collision range of the perpendicular through-lane, a spacing
-requirement the old single-point model never had to reason about at all; the module docstring/
-harness comments carry the derivation.
-**What's still open**: turning movements (e.g. left-turn-yields-to-oncoming-through-traffic) —
-every vehicle in this model goes straight through its own approach. Deliberately deferred rather
-than attempted in the same pass (this project's own precedent: H1 longitudinal-only before H3, H3
-uncombined before H5) since it needs real per-turn path geometry — a curved connector from one
-approach's lane to another's — not just an additional straight approach.
-**What would close it**: give turning vehicles a real curved path between approaches (reusing
-Reeds-Shepp/Dubins-style curve generation from the parking side is a plausible starting point, since
-the underlying geometry problem — connect two poses with a drivable curve — is the same one already
-solved there) and extend the right-of-way check to "yield to oncoming through traffic while
-turning left," the one real-world rule this model still can't express. Not started.
+**Status**: closed, including turning movements. The original gap — no real crossing paths, no way
+to check more than two approaches, no geometric verification that right-of-way reasoning actually
+prevents a collision — was closed first (real 2D layout, `is_to_the_right` derived from actual
+travel headings, real circle-to-circle proximity checking instead of trusting arrival-order
+bookkeeping alone; a real finding along the way: the conflict-zone/lane-offset/stop-margin constants
+aren't independent of `VEHICLE_RADIUS`, since an under-sized intersection can put a vehicle waiting
+at its own stop line within collision range of the perpendicular through-lane). Turning movements
+were then added on top: a vehicle with `turn != "straight"` drives its entry approach's straight
+lane, a real curved connector reusing `DubinsPlanner` (`build_turn_path`), then the exit approach's
+straight lane, and left turns yield to oncoming (opposite-approach) straight-through traffic that
+hasn't cleared — the one right-of-way rule `IntersectionNavigator`'s pure arrival-order model can't
+express on its own, added at the harness level as an extra phantom `OtherVehicleStatus` rather than
+by modifying `IntersectionNavigator` itself.
+**Two real bugs found and fixed while adding turning movements**, both via a random mixed-turn sweep
+(varying start distances and turn assignments across all four approaches, hundreds of trials) rather
+than the hand-picked two-vehicle scenarios that had looked correct in isolation:
+1. **Geometric inconsistency between the curve's start and the stop line.** `build_turn_path` starts
+   the curved connector `turn_lead = TURN_LEAD_RATIO * turning_radius` before the conflict zone (a
+   real finding on its own: an under-sized `turn_lead` made `DubinsPlanner`'s CSC solve find a long,
+   looping connection instead of the short, direct one — the same "CCC would be shorter" regime
+   entry 5 characterized, but `DubinsPlanner` has no CCC fallback; `TURN_LEAD_RATIO = 2.5` was swept
+   as the smallest value with margin that stayed short and direct for both turn directions across
+   `turning_radius` 4-8m). But `IntersectionNavigator`'s own 1D stop line sits at
+   `conflict_half_width + stop_margin` before the zone — a value chosen independently, for the
+   straight-through-only model, with no awareness of `turn_lead` at all. When `turn_lead` exceeded
+   that, a turning vehicle's stop line fell *inside* the curve's span, so a genuinely stopped vehicle
+   was already geometrically partway around the corner instead of cleanly on its straight entry lane
+   — confirmed directly (a stopped vehicle's y-coordinate was neither its entry lane's nor its exit
+   lane's), and it produced a real collision in the sweep. Fixed by making the two mutually
+   consistent (`VehicleSpec.turning_radius` default 4.0, `conflict_half_width` default 9.5, chosen so
+   `TURN_LEAD_RATIO * turning_radius <= conflict_half_width + stop_margin` with margin), plus a
+   runtime guard in `run_multi_approach_scenario` that raises immediately if a caller supplies a
+   combination that violates the inequality, so this can't silently regress.
+2. **A circular deadlock between the new yield rule and ordinary arrival-order yielding.** The first
+   version of the oncoming-traffic rule was unconditional but still let a straight vehicle's own real
+   arrival-order status count against it from the opposing left-turner's perspective — so if the
+   left-turner happened to arrive first, the straight vehicle would yield to *it* via normal
+   arrival-order, while the left-turner simultaneously yielded to the straight vehicle via the new
+   rule: a live two-vehicle cycle where neither ever proceeds. Fixed by making the relation strictly
+   one-directional — a straight vehicle never perceives an opposing left-turner's real arrival status
+   at all (so it can never be made to yield to one), while the left-turner's own yield is unconditional
+   as before. A second, narrower version of this bug turned up when the exemption was (wrongly, at
+   first) extended to right-turners too: since the phantom rule only ever fires for a *left*-turner
+   yielding to a *straight* vehicle, exempting right-turners left them with no mutual-exclusion
+   mechanism against an opposing left-turner at all, and the sweep caught real collisions on that
+   specific pairing — reverted to only exempting straight vehicles. A third fix was needed even after
+   the deadlock was gone: the phantom rule originally only engaged once the oncoming vehicle had left
+   `APPROACHING` state (stopped or already proceeding) — but "still approaching" only means "hasn't
+   reached its own stop line yet," not "far away and safe to ignore"; a vehicle at full cruise speed
+   can still reach the conflict zone before a left-turner finishes crossing it. Two vehicles collided
+   in the sweep while both were `PROCEEDING`, because the left-turner's own stop_time arrived and its
+   state check passed before the oncoming vehicle had even stopped. Fixed by gating purely on live
+   position (`d[b] < clear_distance[b]`) instead of navigator state — conservative (a left-turner now
+   waits out an oncoming vehicle's entire approach, not just its time in the box) but that trade
+   favors safety over throughput, consistent with the rest of this project.
+**Verified**: a 400-trial random sweep (random start distances 60-140m, random turn assignment per
+approach) after all three fixes: 0 collisions. `tests/test_intersection_geometry.py` adds direct
+regression coverage — turn exit heading/position correctness, the left-yields-to-oncoming-despite-
+earlier-arrival case and its clearing-early control case, confirmation right-turners don't get the
+special rule, curvature-limit/path-length checks on all 8 (approach x direction) turn geometries, and
+a 60-trial version of the sweep itself.
+**Known, accepted residual — a liveness limitation, not a safety one**: the same 400-trial sweep
+still hits the step budget (never resolves) in ~8% of trials. Confirmed genuinely permanent (still
+stuck at 10x the step budget, not just slow) and confirmed safe (never a collision in any case
+observed). Root cause: the left-turn yield rule is deliberately unconditional/arrival-order-
+independent (that's the real right-of-way rule), and combined with ordinary arrival-order yielding
+among the *other* vehicles present, this can form a genuine N-vehicle wait cycle (e.g. a 3-way cycle:
+a left-turner waits on its unconditional opposite, which waits on a third vehicle that arrived
+earlier, which itself waits on the left-turner for the same reason) — a purely local, pairwise
+right-of-way model has no global cycle detection. This is the same class of limitation as the
+pre-existing exact-simultaneous-arrival tie gridlock (mechanical yield-to-right with no tiebreaker),
+just with a different trigger. Pinned, not hidden, by
+`test_left_turn_yield_can_gridlock_but_never_collides`. Actually closing it would need a global
+precedence graph (topologically order all vehicles' yield relations, detect and break cycles) rather
+than the current per-pair local reasoning — a materially bigger architectural change than turning
+movements themselves needed, and out of scope here.
 
 ### 5. CCC (3-point-turn) family: closed — but the original premise was wrong
 
@@ -142,7 +208,7 @@ is feasible.
 at all 4 of its call sites, and the Euclidean-fallback fix travels with that same flag). CCC's shorter
 paths are more curvature-aggressive than CSC's, and since Hybrid A*'s analytic expansion is attempted
 from every search node once it's near the goal — not just the one final connection — enabling CCC
-there measurably reopened bug 1's Pure Pursuit collision on 3 scenarios, including 2
+there measurably reopened entry 2's Pure Pursuit collision on 3 scenarios, including 2
 (`perpendicular_flanked`, `perpendicular_obstructed_lane`) that were previously perfectly safe.
 `HybridAStarPlanner` already degrades gracefully without CCC (composes the same 3-point-turn shape
 out of ordinary primitives when needed), so it doesn't need the family and isn't worth the risk.

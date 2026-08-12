@@ -45,7 +45,7 @@ class NgsimTrajectory:
 class NgsimFollowingPair:
     leader: NgsimTrajectory
     follower: NgsimTrajectory
-    real_space_headway: np.ndarray  # (N,) meters -- NGSIM's own recorded gap for the follower
+    real_space_headway: np.ndarray  # (N,) meters -- TRUE bumper-to-bumper gap (see load_following_pair)
     real_time_headway: np.ndarray  # (N,) seconds
 
 
@@ -79,7 +79,19 @@ def load_following_pair(
     follower_rows = sorted(
         (r for r in rows if int(r["vehicle_id"]) == follower_id), key=lambda r: int(r["global_time"])
     )
-    real_space_headway = np.array([float(r["space_headway"]) * FEET_TO_METERS for r in follower_rows])
+    # NGSIM's own `space_headway` is front-center-to-front-center (verified directly
+    # against this committed CSV: leader.position - follower.position matches it to
+    # sub-millimeter rounding), not the bumper-to-bumper distance `acc.py`'s
+    # controllers and `AccHarness` mean by "gap" throughout this project. Subtracting
+    # the leader's length converts it to that same convention here, once, so every
+    # downstream consumer (AccHarness's initial-position placement, acc_validation.py's
+    # mean_real_gap plausibility comparison against sim.gap) is comparing like with
+    # like -- previously this was ~lead_length (3.66m, ~20% of the true ~14.9m mean
+    # gap) too large, silently double-counting the leader's length on top of
+    # AccHarness's own (correct) `lead_position - lead_length` bumper computation.
+    real_space_headway = (
+        np.array([float(r["space_headway"]) * FEET_TO_METERS for r in follower_rows]) - leader.length
+    )
     real_time_headway = np.array([float(r["time_headway"]) for r in follower_rows])
 
     return NgsimFollowingPair(

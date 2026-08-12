@@ -56,17 +56,24 @@ def validate(
     settle_distance: float = 150.0,
     dt: float = 0.1,
 ) -> LaneCenteringResult:
+    wheelbase = 2.7
     path = load_lane_centerline()
-    vehicle = Vehicle(x=path[0, 0], y=path[0, 1] + initial_offset, theta=path[0, 2], wheelbase=2.7)
-    controller = StanleyController(wheelbase=2.7, k=k)
+    vehicle = Vehicle(x=path[0, 0], y=path[0, 1] + initial_offset, theta=path[0, 2], wheelbase=wheelbase)
+    controller = StanleyController(wheelbase=wheelbase, k=k)
 
     xs, ys, distances, ctes = [], [], [], []
     while vehicle.x < path[-1, 0]:
         delta = controller.control(vehicle, path, speed)
         vehicle.update(speed, delta, dt)
 
-        nearest = int(np.argmin(np.hypot(path[:, 0] - vehicle.x, path[:, 1] - vehicle.y)))
-        cte = vehicle.y - path[nearest, 1]
+        # Measured at the front axle, matching StanleyController.control()'s own
+        # cross-track error exactly -- it deliberately steers on front-axle CTE, not
+        # the vehicle's rear-axle x/y, so reporting rear-axle CTE here would validate a
+        # different quantity than the one the controller actually drives to zero.
+        front_x = vehicle.x + wheelbase * np.cos(vehicle.theta)
+        front_y = vehicle.y + wheelbase * np.sin(vehicle.theta)
+        nearest = int(np.argmin(np.hypot(path[:, 0] - front_x, path[:, 1] - front_y)))
+        cte = front_y - path[nearest, 1]
 
         xs.append(vehicle.x)
         ys.append(vehicle.y)

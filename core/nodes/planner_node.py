@@ -3,7 +3,7 @@ first pose_estimate it receives, and publishes path. Critically, it plans from t
 vehicle's ESTIMATED pose, not ground truth: a real planner never gets to see the true
 state either.
 
-**Re-planning** (see KNOWN_BUGS.md bug 3 / IMPLEMENTATION.md's M4 entry, "still open:
+**Re-planning** (see KNOWN_BUGS.md entry 3 / IMPLEMENTATION.md's M4 entry, "still open:
 wiring PlannerNode to re-plan"): `ControllerNode` publishes `replan_request` once its
 speed governor has been binding long enough to look like a genuine stall. On that
 signal, this node re-plans from the *latest* pose estimate against the environment's

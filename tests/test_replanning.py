@@ -1,4 +1,4 @@
-"""KNOWN_BUGS.md bug 3 / IMPLEMENTATION.md's M4 entry: PlannerNode used to plan once and
+"""KNOWN_BUGS.md entry 3 / IMPLEMENTATION.md's M4 entry: PlannerNode used to plan once and
 never again, so a sensed obstacle the original plan didn't account for just made the
 vehicle brake and stay stopped forever. Every scenario this project ships is static and
 fully known to the planner up front, so that never actually happened there -- these
@@ -7,11 +7,11 @@ originally obstacle-free route partway through the run.
 
 Two levels of test, deliberately: `PlannerNode`/`ControllerNode`'s re-plan wiring is
 tested directly and deterministically (no dependence on a specific nonlinear closed-loop
-trajectory actually converging), plus one closed-loop integration test that shows the
-whole thing wired together. A pure closed-loop test alone turned out to be a poor primary
-tool here -- see `test_replanning_produces_a_materially_different_obstacle_avoiding_path`
-for why the closed-loop case stops short of *completing* the detour and why that's a
-separate, narrower issue from the bug being fixed.
+trajectory actually converging), plus closed-loop integration tests that show the whole
+thing wired together, actually reaching the goal -- entry 3's own residual (a valid
+re-plan the speed governor still wouldn't drive at speed) used to mean the closed-loop
+case stopped short of *completing* the detour; `ControllerNode`'s tracking-aware buffer
+closed that too, see `test_replanning_produces_a_materially_different_obstacle_avoiding_path`.
 """
 
 import numpy as np
@@ -107,6 +107,48 @@ def test_a_planner_that_cannot_find_a_route_leaves_the_old_path_in_place():
     assert published == []  # still nothing -- the failure was swallowed, not crashed on
 
 
+def test_controller_node_actually_asks_for_a_replan_when_the_initial_plan_failed():
+    """Found in a second code-review pass: PlannerNode marks itself `_planned = True`
+    on the *first* pose_estimate regardless of whether that plan succeeded, so if it
+    fails there's no path -- ever -- unless ControllerNode asks for a replan. But
+    ControllerNode.step() used to early-return whenever `self._path is None`, before
+    ever reaching the stall counter that publishes `replan_request`. The two nodes'
+    failure handling didn't connect: an initially-infeasible start pose left the
+    vehicle stuck forever with the re-planning mechanism (KNOWN_BUGS.md entry 3) never
+    even engaging. This wires both real nodes together (not each in isolation, which
+    is exactly how the gap stayed invisible) and drives ControllerNode.step() directly
+    -- the same call the harness makes once per tick -- to prove the request actually
+    gets sent and PlannerNode actually retries."""
+    from core.control.mpc import MPCController
+    from core.nodes.controller_node import STALL_TICKS, ControllerNode
+
+    class FailsOnceThenSucceeds:
+        def __init__(self):
+            self.calls = 0
+
+        def plan(self, start, goal, obstacles, turning_radius):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("no route from this exact start pose")
+            return np.array([[start[0], start[1], start[2]], [0.0, 0.0, 0.0]])
+
+    bus = Bus()
+    environment = Environment(Spot(0.0, 0.0, 0.0), obstacles=[])
+    planner = FailsOnceThenSucceeds()
+    planner_node = PlannerNode(bus, planner, environment, TURNING_RADIUS, max_replans=3)
+    controller_node = ControllerNode(bus, MPCController(wheelbase=2.7, delta_max=0.6, v_max=1.5), a_max=0.8)
+
+    bus.publish("pose_estimate", _pose(-10.0, 0.0, 0.0))
+    assert planner.calls == 1
+    assert controller_node._path is None  # the initial plan failed; nothing to track yet
+
+    for _ in range(STALL_TICKS):
+        controller_node.step()  # exactly what ParkingHarness.run() calls once per tick
+
+    assert planner.calls == 2  # ControllerNode's stall counter asked for -- and got -- a retry
+    assert controller_node._path is not None  # the retry succeeded; recovery is complete
+
+
 # --- ControllerNode: does a sustained governed stall actually ask to re-plan? --------
 
 
@@ -137,9 +179,9 @@ def test_sustained_governed_stall_requests_a_replan():
 
 
 def test_a_stall_that_never_recovers_keeps_asking_periodically():
-    """Not just once: KNOWN_BUGS.md bug 3's residual note -- a re-plan can itself land on
-    a route the governor still won't move along -- means a stall has to keep retrying,
-    not give up after a single attempt."""
+    """Not just once: a re-plan can still fail to unstick the vehicle (e.g. `max_replans`
+    is already exhausted, or the obstacle genuinely blocks every route), so a stall has
+    to keep retrying, not give up after a single attempt."""
     bus = Bus()
     node = ControllerNode(bus, _AlwaysWantsToMove(), a_max=0.8, stopping_buffer=0.5)
     requests = []
@@ -212,7 +254,7 @@ def _run(max_replans: int, max_steps: int = 500, seed: int = 1):
 
 def test_never_collides_with_a_dynamically_appearing_obstacle():
     """Safety holds regardless of when the obstacle showed up -- ControllerNode's speed
-    governor (KNOWN_BUGS.md bug 1's fix) is what guarantees this on its own, with or
+    governor (KNOWN_BUGS.md entry 2's fix) is what guarantees this on its own, with or
     without re-planning; the tests below are about whether it can also make *progress*,
     not just survive."""
     for max_replans in (0, 3):
@@ -221,19 +263,17 @@ def test_never_collides_with_a_dynamically_appearing_obstacle():
 
 
 def test_replanning_produces_a_materially_different_obstacle_avoiding_path():
-    """The direct fix for the bug: without re-planning, the stale (now-invalid) original
+    """The direct fix for bug 3: without re-planning, the stale (now-invalid) original
     path is never updated, so the vehicle stops short and stays there. With it enabled,
     PlannerNode picks up the live obstacle and computes a real detour.
 
-    This does *not* assert the vehicle goes on to reach the goal in this run: verified
-    while building this test that the detour Hybrid A* finds still passes closer to the
-    obstacle than ControllerNode's `stopping_buffer` (tuned generously for KNOWN_BUGS.md
-    bug 1's slower-approach scenario) allows at speed, so the governor pins it near-zero
-    again right at the start of the new route too. That's a real, separate, narrower
-    interaction between the governor's fixed buffer and the planner's own tighter
-    clearance margin -- worth a future look, but distinct from bug 3 ("never re-plans at
-    all"), which is what this test pins down: the path genuinely changes and genuinely
-    avoids the obstacle, which it provably did not before this fix existed.
+    This used to stop short of asserting the vehicle actually reaches the goal: the
+    detour Hybrid A* finds passes closer to the obstacle than ControllerNode's
+    `stopping_buffer` (tuned for KNOWN_BUGS.md entry 2's slower-approach scenario)
+    allowed at speed, so the governor pinned it near-zero again right at the start of
+    the new route -- KNOWN_BUGS.md entry 3's own residual finding. That's now closed
+    too (`ControllerNode`'s tracking-aware buffer, see its docstring): the vehicle
+    reaches the goal in this exact scenario, not just gets a valid-but-unusable detour.
     """
     without_replanning, _ = _run(max_replans=0)
     with_replanning, harness = _run(max_replans=3)
@@ -247,6 +287,20 @@ def test_replanning_produces_a_materially_different_obstacle_avoiding_path():
         with_replanning.path[:, 0] - DYNAMIC_OBSTACLE.x, with_replanning.path[:, 1] - DYNAMIC_OBSTACLE.y
     ).min()
     assert clearance >= DYNAMIC_OBSTACLE.radius + 1.0  # VEHICLE_RADIUS -- a genuinely valid detour
+    assert not with_replanning.collision
+    assert with_replanning.success  # KNOWN_BUGS.md entry 3: now actually reaches the goal
+
+
+def test_replanning_recovery_holds_across_seeds():
+    """entry_3's fix (tracking-aware buffer) was tuned against a real parameter sweep,
+    not picked by eye -- pin the result down across multiple seeds, not just the one
+    `test_replanning_produces_a_materially_different_obstacle_avoiding_path` happens to
+    use, so a future change to the sweep's chosen constants has real regression
+    coverage."""
+    for seed in [1, 2, 3, 4, 5]:
+        result, _ = _run(max_replans=3, seed=seed)
+        assert not result.collision
+        assert result.success
 
 
 def test_replanning_gives_up_after_max_replans_instead_of_looping_forever():

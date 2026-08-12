@@ -130,12 +130,21 @@ tests/
   test_kitti_ekf_validation.py  # EKF vs. dead-reckoning-only on the committed real KITTI excerpt
   test_planning.py        # endpoint + curvature checks (both planners), obstacle-clearance
                        # check (Hybrid A* only) -- see DESIGN.md section 6's M2 entry
+  test_mpc.py            # parking MPCController: falls back to the warm-started plan, not a
+                       # fresh unconverged solve, when SLSQP doesn't converge
   test_simulation.py       # integration tests, harness-based, across scenarios x controllers x seeds
   test_acc.py            # IDM/MPC-ACC unit + synthetic braking-lead scenario checks
   test_acc_validation.py    # IDM/MPC-ACC vs. real NGSIM data: safety, plausibility, determinism
   test_lane_centering.py    # Stanley convergence (both directions) + steering/speed edge cases
   test_lane_centering_validation.py  # Stanley vs. the real derived lane centerline
   test_intersection.py     # H4 state-machine + right-of-way branch coverage
+  test_intersection_geometry.py  # H4 real 2D geometry + turning movements (KNOWN_BUGS.md entry 4):
+                       # N-way real crossing-path collision checks, turn exit heading/position,
+                       # left-yields-to-oncoming-despite-earlier-arrival, a random mixed-turn sweep
+  test_controller_node.py   # ControllerNode unit coverage: direction-aware governor, tracking-
+                       # aware buffer selection
+  test_replanning.py      # KNOWN_BUGS.md entry 3: PlannerNode/ControllerNode re-plan wiring,
+                       # closed-loop recovery across seeds
   test_full_highway.py     # H5 Phase A: collision safety, real-data coherence, cross-track-error
                        # and gap plausibility, determinism, a direct regression test for the H2
                        # delta=0.0 hardcode fix -- Phase B: stop-line compliance under the
@@ -310,23 +319,33 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   scenario rather than just reasoning about it — held up cleanly, now pinned as a permanent
   regression test. Full account, including the measured before/after numbers for both phases, in
   DESIGN.md section 12's H5 entry.
-- **Real 2D intersection geometry for H4** (KNOWN_BUGS.md entry 4): `control/intersection_geometry.py`
-  (a real 2-road layout, right-hand-traffic lane offsets, a genuine conflict-zone box, `is_to_the_right`
-  derived from actual travel headings) + `intersection2d_harness.py` (runs any number of vehicles —
-  each still an unmodified `IntersectionNavigator` — through it, deriving every `OtherVehicleStatus`
-  from another vehicle's real simulated state instead of a script). Closes the "not full 2D... not
-  more than two approaches... no notion of actual crossing paths" gap; turning movements are
-  deliberately still deferred (see KNOWN_BUGS.md entry 4). **A real finding while building it**: the
-  geometric constants aren't independent of `VEHICLE_RADIUS` — the first version's
-  `conflict_half_width=4.0` against `lane_offset=3.0` let a vehicle waiting at its own stop line land
-  within collision range (2.97m apart, under the 5.0m two-radius threshold) of the perpendicular
-  through-lane, caught directly by a 3-way scenario test rather than reasoned about in the abstract;
-  fixed by widening the defaults (`conflict_half_width=7.0`, `stop_margin=1.5`) to the real minimum
-  clearance the geometry requires. Verified the collision check itself is a real safety net, not
-  vacuously true, by substituting a navigator that always claims right-of-way and confirming it gets
-  caught colliding on a pairing the compliant version already proved safe.
+- **Real 2D intersection geometry for H4, including turning movements** (KNOWN_BUGS.md entry 4, now
+  closed): `control/intersection_geometry.py` (a real 2-road layout, right-hand-traffic lane offsets,
+  a genuine conflict-zone box, `is_to_the_right` derived from actual travel headings, `build_turn_path`
+  reusing `DubinsPlanner` for curved connectors between approaches) + `intersection2d_harness.py`
+  (runs any number of vehicles — each still an unmodified `IntersectionNavigator` — through it,
+  deriving every `OtherVehicleStatus` from another vehicle's real simulated state instead of a
+  script, plus a left-yields-to-oncoming-straight-traffic rule for turning vehicles). Closes the "not
+  full 2D... not more than two approaches... no notion of actual crossing paths... no turning
+  movements" gap in full. **Real findings while building it**: (1) the geometric constants aren't
+  independent of `VEHICLE_RADIUS` — the first version's `conflict_half_width=4.0` against
+  `lane_offset=3.0` let a vehicle waiting at its own stop line land within collision range (2.97m
+  apart, under the 5.0m two-radius threshold) of the perpendicular through-lane, caught directly by a
+  3-way scenario test; (2) adding turning movements needed the conflict-zone size and the curve's own
+  `turn_lead` distance to be mutually consistent too, or a stopped turning vehicle ended up
+  geometrically mid-curve instead of on its straight lane (`conflict_half_width` widened again, to
+  9.5, with a runtime guard against regressing the inequality); (3) the left-yield rule's first two
+  versions each produced a genuine circular deadlock between vehicles (found via a random mixed-turn
+  sweep, not the hand-picked scenarios that looked fine alone) — fixed by making the rule strictly
+  one-directional and position- rather than state-gated. Full account, including the residual (safe
+  but not always live) multi-vehicle wait-cycle limitation, in KNOWN_BUGS.md entry 4. Verified the
+  collision check itself is a real safety net, not vacuously true, by substituting a navigator that
+  always claims right-of-way and confirming it gets caught colliding on a pairing the compliant
+  version already proved safe.
 - **M4 — Sensing & re-planning: done.** Sensor is a multi-beam array (`[-0.6, -0.3, 0.0, 0.3, 0.6]`
-  rad) and braking already checked all beams, not just the front one. What was still open --
+  rad front cone -- a mirrored rear cone was added later, in code review, once the speed governor
+  below needed to actually see behind the vehicle too; see `controller_node.py`'s module docstring)
+  and braking already checked all beams, not just the front one. What was still open --
   wiring `PlannerNode` to re-plan (not just `ControllerNode` to brake) when `SensorNode` reports an
   obstacle the current path didn't account for -- is now built: `ControllerNode` publishes
   `replan_request` once its speed governor (KNOWN_BUGS.md entry 2's fix) has been binding for
@@ -338,17 +357,20 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   fully visible to and routed around by a re-plan, with a real measured clearance margin, not just
   "didn't crash." A real, separate residual found while building this -- a re-plan's resulting
   route can still be tight enough that `ControllerNode`'s fixed `stopping_buffer` throttles
-  progress along it too -- is tracked as KNOWN_BUGS.md's (renumbered) entry 3, not treated as
-  unresolved M4 scope.
+  progress along it too -- was tracked as KNOWN_BUGS.md's (renumbered) entry 3, not treated as
+  unresolved M4 scope, and has since been closed too: `ControllerNode` now uses a smaller,
+  tracking-aware buffer while accurately following a path a planner already verified, derived from
+  the planner's own `safety_margin` via `ParkingHarness` (see controller_node.py's "Tracking-aware
+  buffer" docstring entry and KNOWN_BUGS.md entry 3 for the real parameter sweep this took).
 - **M5 — Visualization polish**: `visualization/animate.py` now shows true vs. estimated
   trajectory, a covariance ellipse, and the planned path (landed as part of ME, since the whole
   point of adding an estimator is visible directly in that comparison). Still open: a genuinely
   multi-panel layout (live sensor readings, speed profile) alongside the top-down view.
-- **M6 — Tests & CI**: 160 tests across both modes run in ~200-265s; no GitHub Actions workflow yet.
+- **M6 — Tests & CI**: 214 tests across both modes run in ~180s; no GitHub Actions workflow yet.
 
 ## 4. Testing strategy
 
-Current (160 tests, ~200-265s -- up from ~100s pre-H5, almost entirely because `test_full_highway.py`
+Current (214 tests, ~180s -- up from ~100s pre-H5, almost entirely because `test_full_highway.py`
 replays a real 78s/780-frame NGSIM trajectory through the full node graph, parametrized over
 multiple controllers and seeds; the M2-era jump from ~20s to ~100s is explained in
 IMPLEMENTATION.md's M2 section above):

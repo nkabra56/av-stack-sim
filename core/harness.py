@@ -30,7 +30,13 @@ from core.nodes.vehicle_node import VehicleNode
 from core.sensors import UltrasonicArray
 from core.vehicle import Vehicle
 
-DEFAULT_SENSOR_ANGLES = [-0.6, -0.3, 0.0, 0.3, 0.6]
+# Front cone (+/-0.6 rad either side of heading) plus a mirrored rear cone (same fan,
+# rotated 180 degrees by construction rather than separately hand-typed, so the two
+# cones can't drift out of symmetry) -- added so ControllerNode's speed governor
+# (controller_node.py's module docstring) can actually see obstacles behind the
+# vehicle during reverse-gear maneuvers, not just in front of it.
+_FRONT_SENSOR_ANGLES = [-0.6, -0.3, 0.0, 0.3, 0.6]
+DEFAULT_SENSOR_ANGLES = _FRONT_SENSOR_ANGLES + [angle + np.pi for angle in _FRONT_SENSOR_ANGLES]
 
 
 @dataclass
@@ -61,6 +67,24 @@ class ParkingHarness:
         # call it parked" has to allow for realistic estimation error, not just controller error
         stopping_buffer: float = 0.5,  # see ControllerNode._safe_speed's docstring
         max_replans: int = 3,  # see PlannerNode's docstring
+        tracked_buffer_extra: float = 0.4,  # see ControllerNode's "Tracking-aware buffer"
+        # docstring entry (KNOWN_BUGS.md entry 3): real stopping margin *above* whatever
+        # clearance the active planner guarantees while accurately tracked, not the
+        # planner's raw safety_margin itself (that would leave zero margin for the same
+        # sense-decide-act latency stopping_buffer already has to absorb). Paired with
+        # ControllerNode's default `tracking_threshold=0.03` in a real parameter sweep
+        # (tests/test_replanning.py). Raised from 0.3 (the original smallest/safest value
+        # found) to 0.4 after `_effective_buffer`'s cross-track measurement was fixed to
+        # use true perpendicular-to-segment distance instead of nearest-waypoint distance
+        # (a code-review finding, not an entry-3 finding): the more accurate, generally
+        # *smaller* measurement classifies more ticks as "tracking," using the smaller
+        # buffer more often -- and 0.3 turned out to have essentially no margin left, a
+        # 25-seed re-sweep found 1/10 real collisions at 0.3 that a narrower 5-seed check
+        # didn't surface (and 0.2 fails outright, 4/5 collisions -- confirming this
+        # constant sits right at a real safety cliff, not a comfortable margin above one).
+        # 0.4 held 0/25 collisions with 23/25 full completions across seeds 1-25 (the 2
+        # non-completions are the already-documented max_replans residual, not unsafe).
+        tracking_threshold: float = 0.03,  # see ControllerNode's constructor docstring
     ):
         self.environment = environment
         self.tol = tol
@@ -70,6 +94,15 @@ class ParkingHarness:
         self.vehicle_node = VehicleNode(self.bus, vehicle, dt, rng, v_max=v_max, a_max=a_max, k_acc=k_acc)
         ultrasonic = UltrasonicArray(angles=DEFAULT_SENSOR_ANGLES, max_range=8.0)
         self.sensor_node = SensorNode(self.bus, ultrasonic, environment, rng)
+
+        # Only planners that actually guarantee an obstacle clearance while being tracked
+        # (HybridAStarPlanner's `safety_margin`) earn a smaller tracked-buffer; planners with
+        # no such attribute (DubinsPlanner/ReedsSheppPlanner, both obstacle-blind) get None,
+        # which disables the feature entirely and keeps ControllerNode's fully conservative
+        # `stopping_buffer` for any proximity, tracked or not -- see ControllerNode's
+        # "Tracking-aware buffer" docstring entry.
+        planner_margin = getattr(planner, "safety_margin", None)
+        tracked_stopping_buffer = planner_margin + tracked_buffer_extra if planner_margin is not None else None
 
         ekf = ExtendedKalmanFilter(
             x0=np.array([vehicle.x, vehicle.y, vehicle.theta]),
@@ -85,7 +118,10 @@ class ParkingHarness:
         )
         self.estimator_node = EstimatorNode(self.bus, ekf, environment)
         self.planner_node = PlannerNode(self.bus, planner, environment, vehicle.turning_radius, max_replans=max_replans)
-        self.controller_node = ControllerNode(self.bus, controller, a_max=a_max, stopping_buffer=stopping_buffer)
+        self.controller_node = ControllerNode(
+            self.bus, controller, a_max=a_max, stopping_buffer=stopping_buffer,
+            tracked_stopping_buffer=tracked_stopping_buffer, tracking_threshold=tracking_threshold,
+        )
 
         # A controller with its own internal rollout model (e.g. MPCController) has to predict
         # forward using the *actual* tick length, or its predictions silently desync from the
@@ -118,7 +154,7 @@ class ParkingHarness:
 
     def run(self, max_steps: int = 500, on_tick: Callable[[int], None] | None = None) -> SimulationResult:
         """`on_tick(tick)`, if given, runs before each tick's nodes step -- its only use
-        so far is tests exercising re-planning (KNOWN_BUGS.md bug 3): mutating
+        so far is tests exercising re-planning (KNOWN_BUGS.md entry 3): mutating
         `self.environment.obstacles` mid-run to simulate an obstacle that wasn't there
         when `PlannerNode` made its first (and, for every scenario this project ships,
         only) plan. Every node reads `self.environment` live, not a snapshot, so this is

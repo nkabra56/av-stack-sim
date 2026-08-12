@@ -120,12 +120,16 @@ duplicated in every controller, is what makes it trustworthy: no controller can 
 ## 4. Sensor model
 
 A simulated ultrasonic array (`obstacle_ranges`): a fixed set of beam angles relative to the
-vehicle heading, each cast as a ray against the obstacle set. Obstacles are circles (parametrized
-by center + radius), so each beam's distance is the closest ray/circle intersection, computed
-analytically via the quadratic formula rather than by discretized ray-marching (cheaper, exact,
-and simple to unit test against hand-computed cases). Each beam returns `max_range` if no obstacle
-is hit; `ControllerNode` brakes when the closest reading across all beams drops below
-`brake_distance`.
+vehicle heading (a front cone plus a mirrored rear cone, `harness.py`'s `DEFAULT_SENSOR_ANGLES`),
+each cast as a ray against the obstacle set. Obstacles are circles (parametrized by center +
+radius), so each beam's distance is the closest ray/circle intersection, computed analytically via
+the quadratic formula rather than by discretized ray-marching (cheaper, exact, and simple to unit
+test against hand-computed cases). Each beam returns `max_range` if no obstacle is hit.
+`ControllerNode` governs speed continuously from the closest reading rather than a binary brake
+threshold (see its module docstring, KNOWN_BUGS.md entry 2), and does so separately per direction
+of travel: forward speed is limited only by front-cone beams, reverse speed only by rear-cone
+beams, so an obstacle on one side never throttles (or, worse, fails to guard) travel toward the
+other.
 
 Three more sensors, all noisy, feed the estimator (Section 5) rather than the controller directly:
 a `compass` (heading only, always on, every tick), a low-rate `position_fix` (x, y only), and
@@ -728,11 +732,12 @@ not a strict target, since the real driver isn't assumed optimal).
   provides, free for non-commercial use but registration-gated (a manual data-request form, no
   anonymous download) — worth it once lane geometry precision actually matters, not required to
   build H3 in the first place.
-- **Turning movements at a real 2D intersection**: `control/intersection_geometry.py` +
+- ~~Turning movements at a real 2D intersection~~: done. `control/intersection_geometry.py` +
   `intersection2d_harness.py` (built after this section was first written -- see KNOWN_BUGS.md
-  entry 4) already give H4 real crossing paths, N-way approaches, and geometric collision
-  verification, running several unmodified `IntersectionNavigator` instances through one shared
-  intersection instead of H4's original single scripted `OtherVehicleStatus`. What's still missing
-  is turning movements (left-turn-yields-to-oncoming) -- every vehicle in that model goes straight
-  through its own approach; a turning vehicle needs a real curved connector path between two
-  approaches, not just another straight one.
+  entry 4, now closed) give H4 real crossing paths, N-way approaches, geometric collision
+  verification, and turning vehicles (a real curved connector reusing `DubinsPlanner` between
+  approaches, plus a left-yields-to-oncoming-straight-traffic rule), running several unmodified
+  `IntersectionNavigator` instances through one shared intersection instead of H4's original single
+  scripted `OtherVehicleStatus`. A known, accepted residual: the yield rule can produce a permanent
+  (but never unsafe) multi-vehicle wait cycle in rare mixed-turn arrival patterns -- see entry 4 for
+  why closing that fully needs a global precedence graph, out of scope so far.

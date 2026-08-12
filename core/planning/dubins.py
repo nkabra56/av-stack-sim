@@ -131,21 +131,28 @@ def _solve_csc(
     return min(candidates, key=lambda c: c[0])
 
 
-def _csc_points(
-    start: Pose, first: str, last: str, t: float, p: float, q: float, turning_radius: float, step: float = 0.1
+def _walk_segments(
+    start: Pose, seg_defs: list[tuple[str, float]], turning_radius: float, step: float
 ) -> np.ndarray:
-    """Walk the (first, S, last) segment list from start, sampling at fixed
-    arc-length `step` (meters) -- a fixed step keeps per-call cost proportional to
-    actual path length, needed by reeds_shepp.py/hybrid_astar.py which call this many
-    times per search at widely varying lengths."""
-    seg_defs = [(first, t, True), ("S", turning_radius * p, False), (last, q, True)]
-    seg_lengths = np.array([turning_radius * mag if is_angle else mag for _, mag, is_angle in seg_defs])
+    """Walk a (kind, magnitude) segment list from start, sampling at fixed arc-length
+    `step` (meters) -- a fixed step keeps per-call cost proportional to actual path
+    length, needed by reeds_shepp.py/hybrid_astar.py which call this many times per
+    search at widely varying lengths.
+
+    `kind == "S"` is a straight segment of length `magnitude` (already a real
+    distance, not scaled by `turning_radius`); any other kind ("L"/"R") is an arc of
+    swept angle `magnitude` radians at `turning_radius`. Shared by dubins.py's CSC
+    composer (`_csc_points`, 3 segments, one "S") and reeds_shepp.py's CCC composer
+    (`_ccc_points`, 3 segments, all turns) -- the two families only differ in which
+    segment kinds appear, not in how they're sampled or stitched together, so they'd
+    otherwise duplicate this exact step-count/stitching logic."""
+    seg_lengths = np.array([mag if kind == "S" else turning_radius * mag for kind, mag in seg_defs])
     total = seg_lengths.sum()
-    counts = np.maximum(2, np.round(seg_lengths / step).astype(int)) if total > 1e-9 else [2, 2, 2]
+    counts = np.maximum(2, np.round(seg_lengths / step).astype(int)) if total > 1e-9 else [2] * len(seg_defs)
 
     pose = start
     segments = []
-    for (kind, mag, _is_angle), n in zip(seg_defs, counts):
+    for (kind, mag), n in zip(seg_defs, counts):
         pts = _straight_points(pose, mag, n) if kind == "S" else _arc_points(pose, turning_radius, mag, kind == "L", n)
         segments.append(pts)
         pose = tuple(pts[-1])
@@ -153,6 +160,12 @@ def _csc_points(
     path = np.vstack(segments)
     path[:, 2] = wrap_angle(path[:, 2])
     return path
+
+
+def _csc_points(
+    start: Pose, first: str, last: str, t: float, p: float, q: float, turning_radius: float, step: float = 0.1
+) -> np.ndarray:
+    return _walk_segments(start, [(first, t), ("S", turning_radius * p), (last, q)], turning_radius, step)
 
 
 class DubinsPlanner:

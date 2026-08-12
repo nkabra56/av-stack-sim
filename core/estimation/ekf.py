@@ -169,6 +169,14 @@ class ExtendedKalmanFilter:
         x, y, theta = self.x[0], self.x[1], self.x[2]
         dx, dy = lx - x, ly - y
         q = dx * dx + dy * dy
+        if q < 1e-6:
+            # Degenerate geometry: the estimate sits on (or within 1mm of) the landmark,
+            # so both the range Jacobian (1/range_pred) and bearing Jacobian (1/q) blow
+            # up toward Inf/NaN and would permanently poison self.x with no recovery
+            # path. There's no real information in a bearing to a point you're standing
+            # on anyway, so skip this update rather than risk it -- next tick's motion
+            # moves the estimate off the landmark and updates resume normally.
+            return
         range_pred = np.sqrt(q)
         bearing_pred = wrap_angle(np.arctan2(dy, dx) - theta)
 

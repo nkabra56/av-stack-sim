@@ -73,7 +73,15 @@ class MpcAccController:
         horizon: int = 10,
         v0: float = 30.0,
         a_max: float = 1.5,
-        a_min: float = -3.0,
+        a_min: float = -9.0,  # matches IDMController's physical emergency-braking floor
+        # (~1g) -- both controllers implement the identical control(ego_speed, gap,
+        # lead_speed) contract for the same plant, so a materially tighter cap here
+        # (-3.0, the old default) meant MPC-ACC could physically brake less hard than
+        # IDM under an identical hard-braking lead event, an untested asymmetry (the
+        # only test that varied lead deceleration used ~2 m/s^2, comfortably inside
+        # both). min_gap/time_headway are what keep normal-driving braking comfortable
+        # in practice; a_min is only ever reached when the gap constraint is already
+        # under real pressure and every m/s^2 of available braking matters.
         min_gap: float = 3.0,
         time_headway: float = 1.5,
         w_speed: float = 1.0,
@@ -117,7 +125,7 @@ class MpcAccController:
 
     def _effective_min_gap(self, ego_speed: float, lead_positions: np.ndarray) -> np.ndarray:
         """A per-horizon-step floor that's *always* achievable, fixing the actual defect
-        behind KNOWN_BUGS.md's bug 2: a flat `min_gap` constraint can demand something no
+        behind KNOWN_BUGS.md's entry 1: a flat `min_gap` constraint can demand something no
         acceleration sequence can deliver (the ego closing on a stopped lead can't reverse
         to recover lost distance), so SLSQP was solving a genuinely infeasible NLP and
         silently returning its best constraint-violating attempt.
@@ -167,6 +175,22 @@ class MpcAccController:
             options={"maxiter": self.maxiter, "ftol": 1e-4},
         )
         a_seq = result.x
+
+        # Unlike the parking MPC (bounds only), this has a genuine nonlinear inequality
+        # constraint (the gap floor) that SLSQP can silently violate when it doesn't
+        # converge -- `_effective_min_gap`'s own docstring already documents this
+        # exact failure mode for the *old*, infeasible constraint; making the
+        # constraint feasible didn't add a check that the solver actually reaches a
+        # feasible point within `maxiter`. Verify directly rather than trusting
+        # `result.success` alone (SLSQP can report failure on an otherwise-fine point,
+        # or succeed near a boundary within its own tolerance) -- if the returned
+        # sequence violates the gap constraint by more than numerical slack, fall back
+        # to `_effective_min_gap`'s own feasibility witness (braking at `a_min` every
+        # step): the same concrete "this is always achievable" sequence that
+        # constraint already relies on, so it's guaranteed safe rather than merely
+        # conservative.
+        if np.any(self._gap_constraint(a_seq, ego_speed, lead_positions, effective_min_gap) < -1e-3):
+            a_seq = np.full(self.horizon, self.a_min)
 
         shifted = np.roll(a_seq, -1)
         shifted[-1] = a_seq[-1]

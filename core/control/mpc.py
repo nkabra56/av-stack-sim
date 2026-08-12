@@ -94,7 +94,13 @@ class MPCController:
             bounds=bounds,
             options={"maxiter": self.maxiter, "ftol": 1e-4},
         )
-        u = result.x
+        # SLSQP's bounds are structurally enforced even on non-convergence, so `result.x`
+        # is never out-of-actuator-range -- but an unconverged solve can still be a
+        # poor, even oscillatory command chosen from too few iterations. Falling back to
+        # `u0` (last tick's plan, shifted) rather than trusting a fresh unvalidated
+        # solve is strictly safer and costs nothing: it's exactly what this tick would
+        # have warm-started from anyway.
+        u = result.x if result.success else u0
 
         shifted = np.roll(u, -2)
         shifted[-2:] = u[-2:]

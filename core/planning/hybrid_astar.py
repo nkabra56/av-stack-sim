@@ -24,7 +24,7 @@ family for its own standalone planner: CCC paths are shorter but more curvature-
 aggressive than CSC's, and since analytic expansion is attempted from every search node
 once it's close to the goal (not just the final connection), letting Hybrid A* use CCC
 measurably reopened Pure Pursuit's curvature-saturation collision risk (KNOWN_BUGS.md
-bug 1) on scenarios that were previously safe. This planner already "degrades
+entry 2) on scenarios that were previously safe. This planner already "degrades
 gracefully" without CCC -- its own primitive search can compose the same 3-point-turn
 shape out of ordinary forward/reverse steps when it needs to -- so it doesn't need the
 family and the curvature-risk cost isn't worth paying here. See reeds_shepp.py's module

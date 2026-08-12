@@ -29,7 +29,7 @@ net heading change into less arc length than an S-curve does -- and Hybrid A*'s
 analytic expansion is attempted from every search node once it's within
 `analytic_expansion_radius_factor * turning_radius` of the goal, not just the final
 connection. Verified directly: turning CCC on unconditionally for Hybrid A* too
-reopened KNOWN_BUGS.md bug 1's exact failure mode (Pure Pursuit colliding on
+reopened KNOWN_BUGS.md entry 2's exact failure mode (Pure Pursuit colliding on
 curvature-saturated paths) on 3 scenarios, including 2 that were previously perfectly
 safe (`perpendicular_flanked`, `perpendicular_obstructed_lane`) -- CCC's shorter, tighter
 final connections were curvature-saturated often enough to erase Pure Pursuit's margin
@@ -53,8 +53,7 @@ import numpy as np
 
 from core.environment import Obstacle
 from core.interfaces import Pose
-from core.planning.dubins import _arc_points, _csc_points, _mod2pi, _solve_csc
-from core.vehicle import wrap_angle
+from core.planning.dubins import _csc_points, _mod2pi, _solve_csc, _walk_segments
 
 
 def _turn_center(pose: Pose, radius: float, left: bool) -> tuple[float, float]:
@@ -69,12 +68,18 @@ def _turn_center(pose: Pose, radius: float, left: bool) -> tuple[float, float]:
 
 def _tangent_circle_centers(c1: tuple[float, float], c3: tuple[float, float], radius: float) -> list[tuple[float, float]]:
     """Center(s) of a circle of `radius` externally tangent to both circles of the
-    same `radius` centered at c1 and c3 -- i.e. points exactly `2*radius` from both,
-    the standard circle-circle intersection construction. 0, 1, or 2 solutions;
-    2 solutions exist whenever `|c1 - c3| < 2*radius`, i.e. CCC's own feasibility
-    condition (start/goal turning circles, themselves radius `radius`, closer together
-    than `4*radius` -- matching the "~4x turning_radius" regime this family exists
-    for)."""
+    same `radius` centered at c1 and c3 -- i.e. points exactly `radius` from both c1
+    and c3, the standard circle-circle intersection construction. 0, 1, or 2
+    solutions; 2 solutions exist whenever `|c1 - c3| < 2*radius`.
+
+    Called as `_tangent_circle_centers(c1, c3, 2*turning_radius)`: c1/c3 are the
+    start/goal turning circles' own centers, each really radius `turning_radius`, not
+    `radius` -- passing `2*turning_radius` here is what makes the *returned* point a
+    valid center for a third turning-radius circle mutually tangent to both (tangent
+    circles of equal radius r have centers exactly 2r apart), not a claim that c1/c3
+    share this function's `radius` parameter. So the `2*radius` in the feasibility
+    condition above is `4*turning_radius` at the actual call site -- matching CCC's
+    "~4x turning_radius" feasibility regime."""
     c1_arr, c3_arr = np.array(c1), np.array(c3)
     d = float(np.linalg.norm(c3_arr - c1_arr))
     if d > 2 * radius or d < 1e-9:
@@ -150,24 +155,9 @@ def _solve_ccc(
 def _ccc_points(
     start: Pose, first: str, mid: str, last: str, t: float, p: float, q: float, turning_radius: float, step: float = 0.1
 ) -> np.ndarray:
-    """Walk the (first, mid, last) turn sequence from start, sampling at fixed
-    arc-length `step` -- CCC's analog of `_csc_points`, minus the straight segment
-    (all three legs here are arcs)."""
-    seg_defs = [(first, t), (mid, p), (last, q)]
-    seg_lengths = np.array([turning_radius * mag for _, mag in seg_defs])
-    total = seg_lengths.sum()
-    counts = np.maximum(2, np.round(seg_lengths / step).astype(int)) if total > 1e-9 else [2, 2, 2]
-
-    pose = start
-    segments = []
-    for (kind, mag), n in zip(seg_defs, counts):
-        pts = _arc_points(pose, turning_radius, mag, kind == "L", n)
-        segments.append(pts)
-        pose = tuple(pts[-1])
-
-    path = np.vstack(segments)
-    path[:, 2] = wrap_angle(path[:, 2])
-    return path
+    """CCC's analog of `_csc_points` -- all three legs are turns, no straight segment
+    (see `_walk_segments`, shared with dubins.py's CSC composer)."""
+    return _walk_segments(start, [(first, t), (mid, p), (last, q)], turning_radius, step)
 
 
 def reeds_shepp_length(start: Pose, goal: Pose, turning_radius: float, include_ccc: bool = True) -> float:
@@ -194,7 +184,7 @@ def reeds_shepp_length(start: Pose, goal: Pose, turning_radius: float, include_c
     can't cause a worse-than-optimal-under-the-discretization path to be missed), but
     it does change *which* of several equally-valid discretized paths the search finds
     first, by changing expansion order -- verified directly that this alone (with CCC
-    still off) was enough to reopen KNOWN_BUGS.md bug 1's collision on 2 scenarios,
+    still off) was enough to reopen KNOWN_BUGS.md entry 2's collision on 2 scenarios,
     independent of CCC. Since `HybridAStarPlanner` passes `include_ccc=False`
     specifically to keep its search behavior byte-for-byte unchanged from its
     already-validated state, the Euclidean-fallback correction has to travel with that
@@ -227,10 +217,10 @@ def reeds_shepp_path(start: Pose, goal: Pose, turning_radius: float, step: float
     if include_ccc:
         families += [(_solve_ccc, "ccc", start, goal, "forward"), (_solve_ccc, "ccc", goal, start, "backward")]
     candidates = []
-    for solve, points_fn, a, b, direction in families:
+    for solve, family_kind, a, b, direction in families:
         result = solve(a, b, turning_radius)
         if result is not None:
-            candidates.append((result[0], direction, points_fn, result[1:]))
+            candidates.append((result[0], direction, family_kind, result[1:]))
     if not candidates:
         return None
 

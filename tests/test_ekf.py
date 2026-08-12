@@ -72,6 +72,22 @@ def test_predict_grows_covariance():
     assert np.trace(ekf.p) > trace_before
 
 
+def test_update_landmark_on_top_of_the_landmark_does_not_produce_nan():
+    """Code-review finding: the measurement Jacobian divides by range_pred (1/range)
+    and q (1/range^2), unguarded -- if the estimate ever lands exactly on (or within a
+    mm of) a mapped landmark, both blow up toward Inf/NaN and permanently poison the
+    state via `self.x = self.x + k @ innovation`, with no recovery path. Skipping the
+    update in that degenerate case (there's no real bearing information to a point
+    you're standing on anyway) is what closes it."""
+    ekf = _ekf()
+    ekf.x[:2] = [5.0, 1.0]
+    ekf.update_landmark(0.0, 0.0, (5.0, 1.0))  # estimate sits exactly on the landmark
+    assert np.all(np.isfinite(ekf.x))
+    assert np.all(np.isfinite(ekf.p))
+    assert ekf.x[0] == pytest.approx(5.0)  # unchanged: the update was skipped, not corrupted
+    assert ekf.x[1] == pytest.approx(1.0)
+
+
 def test_filter_stays_bounded_near_truth_over_many_cycles():
     """Simulate a vehicle driving straight with noisy odometry (dead reckoning) and
     periodic compass + position corrections; the filter's estimate should track true

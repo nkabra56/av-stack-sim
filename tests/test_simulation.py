@@ -25,7 +25,7 @@ CONTROLLERS = {
 # tracking error alone (not sensor-braking blind spots, not planner infeasibility --
 # the planned path itself keeps a verified 1.15m clearance floor) saturates the
 # vehicle's steering with zero margin to correct. ControllerNode's speed governor
-# (see controller_node.py's docstring, KNOWN_BUGS.md bug 1) now brings the vehicle to
+# (see controller_node.py's docstring, KNOWN_BUGS.md entry 2) now brings the vehicle to
 # a safe stop before contact instead of colliding -- 0/5 collisions across seeds 1-5,
 # down from a previously-measured 5/5 -- but it still can't complete the maneuver
 # (0/5 success): once curvature is saturated, there's no achievable steering command
@@ -72,7 +72,7 @@ def test_never_collides(scenario_name, controller_name, seed):
     """Safety must hold regardless of estimation noise, on every seed, for every
     (scenario, controller) combination -- including parallel_between_cars/pure_pursuit,
     which used to be excluded here as a documented exception (see NEVER_SUCCEEDS and
-    KNOWN_BUGS.md bug 1): ControllerNode's speed governor now makes it fail safe
+    KNOWN_BUGS.md entry 2): ControllerNode's speed governor now makes it fail safe
     (stops short) instead of failing dangerously (collides)."""
     result = _run(scenario_name, controller_name, seed)
     assert not result.collision

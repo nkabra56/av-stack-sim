@@ -179,7 +179,7 @@ def test_hybrid_astar_does_not_use_ccc():
     """KNOWN_BUGS.md entry 5 / reeds_shepp.py's module docstring: CCC is deliberately
     NOT available to HybridAStarPlanner (all 4 of its reeds_shepp_length/reeds_shepp_path
     call sites pass include_ccc=False), because it's more curvature-aggressive than CSC
-    and reopened Pure Pursuit's curvature-saturation collision risk (KNOWN_BUGS.md bug 1)
+    and reopened Pure Pursuit's curvature-saturation collision risk (KNOWN_BUGS.md entry 2)
     on scenarios that were previously safe when tried unconditionally. This doesn't
     re-derive that finding (tests/test_simulation.py's collision tests already do,
     every run) -- it just pins the source-level guard so a future edit can't silently
