@@ -99,6 +99,37 @@ python -m core.validation.acc_validation --controller mpc --plot out.png   # MPC
 python -m core.validation.lane_centering_validation --plot out.png   # Stanley vs. a real NGSIM lane
 ```
 
+### Docker
+
+```bash
+docker build -t auto-park .          # base image: core sim + tests (numpy/scipy/matplotlib/pyyaml)
+docker run --rm auto-park            # runs the test suite (the image's default command)
+
+# Anything that writes a file (--save/--plot) needs an output volume mounted, since
+# nothing else written inside the container persists past the run:
+docker run --rm -v "$PWD/out:/app/out" auto-park \
+  python -m core.demo perpendicular_open --save out/demo.gif
+
+# The `rl` extra (gymnasium + stable-baselines3, pulling in torch -- a multi-GB
+# addition, so it's a separate build target, not part of the base image) is only
+# needed for core/rl/train.py and the RL comparison scripts:
+docker build -t auto-park:rl --target rl .
+docker run --rm -v "$PWD/out:/app/out" auto-park:rl \
+  python -m core.rl.train perpendicular_open --timesteps 300000 --save out/policy.zip
+
+# docker-compose.yml wraps the common cases above (test/demo/rl-train services):
+docker compose run --rm test
+docker compose run --rm demo
+```
+
+Built and tested locally with `pip install -e .` in this repo's own development
+environment, not against these Docker images specifically -- Docker itself wasn't
+available in the environment these files were written in, so the Dockerfile/
+docker-compose.yml haven't been build-verified. They follow standard, low-risk
+patterns (an official `python:3.12-slim` base, editable install from `pyproject.toml`,
+no dependencies without prebuilt Linux wheels), but if the build fails on your
+machine, that's real signal to open an issue, not an unlikely edge case.
+
 Other parking scenarios: `perpendicular_flanked`, `perpendicular_obstructed_lane`,
 `parallel_open`, `parallel_between_cars`.
 

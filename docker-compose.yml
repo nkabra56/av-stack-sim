@@ -1,0 +1,28 @@
+# Convenience wrappers around the two Dockerfile targets -- see Dockerfile's own
+# comments for what each target includes. `docker compose run --rm <service> ...`
+# appends extra arguments to the service's command, same as `docker run <image> ...`.
+services:
+  test:
+    build:
+      context: .
+      target: base
+    command: ["pytest", "-q"]
+
+  demo:
+    build:
+      context: .
+      target: base
+    # Output (e.g. --save/--plot files) lands in ./out on the host -- nothing
+    # written elsewhere in the container persists past the run.
+    volumes:
+      - ./out:/app/out
+    command: ["python", "-m", "core.demo", "perpendicular_open", "--save", "out/demo.gif"]
+
+  rl-train:
+    build:
+      context: .
+      target: rl
+    volumes:
+      - ./out:/app/out
+    command:
+      ["python", "-m", "core.rl.train", "perpendicular_open", "--timesteps", "300000", "--save", "out/policy.zip"]
