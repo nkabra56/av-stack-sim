@@ -16,10 +16,12 @@ mode than anything a stopping-buffer margin can fix). See KNOWN_BUGS.md for the 
 account of both residuals.
 """
 
+import numpy as np
 import pytest
 
 from core.control.mpc import MPCController
 from core.control.pure_pursuit import PurePursuitAdaptive
+from core.environment import VEHICLE_RADIUS
 from core.harness import ParkingHarness
 from core.planning.hybrid_astar import HybridAStarPlanner
 from core.scenario_loader import list_scenarios, load_scenario
@@ -55,22 +57,56 @@ def test_never_collides_under_sensor_latency(scenario_name, controller_name):
         assert not result.collision
 
 
+def _min_clearance(true_history: np.ndarray, obstacles) -> float:
+    """Minimum signed vehicle-to-obstacle clearance across a run: negative means the
+    vehicle's collision circle actually overlapped an obstacle's (by that many meters),
+    positive means it stayed clear by that much. Same circle-circle geometry as
+    `ParkingHarness._collided`, just continuous instead of thresholded at exactly 0."""
+    xy = true_history[:, :2]
+    return min(
+        float(np.min(np.hypot(xy[:, 0] - o.x, xy[:, 1] - o.y) - (o.radius + VEHICLE_RADIUS)))
+        for o in obstacles
+    )
+
+
 def test_latency_margin_is_what_actually_closes_the_gap():
     """Regression for the fix itself: on this exact case, a controller that doesn't
     know about the delay (latency_margin forced to 0, simulating the pre-fix governor)
-    collides; the real fix (latency_margin computed from sensor_latency_ticks) does
-    not -- confirms the governor's extra margin is load-bearing, not redundant with
+    penetrates a real obstacle by several centimeters; the real fix (latency_margin
+    computed from sensor_latency_ticks) keeps a comfortable multi-decimeter clearance
+    instead -- confirms the governor's extra margin is load-bearing, not redundant with
     something else that would have caught it anyway. `parallel_between_cars` is
     already KNOWN_BUGS.md entry 2's tightest-margin scenario, so it's also the most
-    sensitive one to a missing margin -- collides reliably at latency=5 without the
-    fix (verified across all 5 seeds, both controllers) despite that latency level
-    being otherwise fully safe (see test_never_collides_under_sensor_latency above)."""
-    scenario = load_scenario("parallel_between_cars")
-    planner = HybridAStarPlanner()
-    controller = MPCController(wheelbase=scenario.vehicle.wheelbase, delta_max=scenario.vehicle.max_steer, v_max=1.5)
-    harness = ParkingHarness(
-        scenario.vehicle, scenario.environment, planner, controller, seed=1, sensor_latency_ticks=5
-    )
-    harness.controller_node.latency_margin = 0.0  # simulate the pre-fix governor directly
-    result = harness.run(max_steps=1000)
-    assert result.collision
+    sensitive one to a missing margin.
+
+    Asserts on continuous minimum clearance, not the boolean `result.collision`, with
+    real numerical headroom on both sides of zero -- KNOWN_BUGS.md entry 8: at this
+    test's original `latency_ticks=5`, the no-fix case is itself only a ~2-7mm
+    penetration (measured across seeds 1-5), smaller than the floating-point
+    differences a different BLAS-backend/CPU platform's SLSQP solve (`MPCController`)
+    produces over this trajectory's ~300+ ticks -- observed to flip the boolean outcome
+    between a Windows host and a Linux Docker container despite byte-identical
+    numpy/scipy versions on both. `latency_ticks=10` -- still inside this scenario's
+    own documented verified-safe upper bound (entry 7) -- produces a consistent ~6cm
+    penetration without the fix and >15cm clearance with it, confirmed matching between
+    host and container to within ~3mm, well clear of that noise floor."""
+
+    def _run(latency_margin_override: float | None) -> float:
+        # Reloaded per call, not shared: VehicleNode.update() mutates the Vehicle object
+        # it's given in place, so reusing one `scenario` across both calls would have the
+        # second run silently start from wherever the first run's vehicle ended up.
+        scenario = load_scenario("parallel_between_cars")
+        planner = HybridAStarPlanner()
+        controller = MPCController(
+            wheelbase=scenario.vehicle.wheelbase, delta_max=scenario.vehicle.max_steer, v_max=1.5
+        )
+        harness = ParkingHarness(
+            scenario.vehicle, scenario.environment, planner, controller, seed=1, sensor_latency_ticks=10
+        )
+        if latency_margin_override is not None:
+            harness.controller_node.latency_margin = latency_margin_override  # simulate the pre-fix governor
+        result = harness.run(max_steps=1000)
+        return _min_clearance(result.true_history, scenario.environment.obstacles)
+
+    assert _run(0.0) < -0.03  # decisive penetration without the fix, not a hairline zero-crossing
+    assert _run(None) > 0.05  # and a comfortable, non-hairline gap with the real fix

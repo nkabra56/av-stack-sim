@@ -279,6 +279,52 @@ state, then re-propagate forward -- a well-established estimation technique, but
 feature than a stopping-buffer margin). `tests/test_sensor_robustness.py` pins the currently-verified-
 safe range (dropout_prob<=0.2, latency_ticks<=10) as a real regression test, not just a claim.
 
+### 8. Dockerization build-verified; one regression test was platform-float-sensitive -- closed
+
+**Where**: `Dockerfile`, `docker-compose.yml`; `tests/test_sensor_robustness.py`'s
+`test_latency_margin_is_what_actually_closes_the_gap`; solver in `core/control/mpc.py`'s
+`MPCController.control` (`scipy.optimize.minimize(method="SLSQP")`).
+**Status**: closed. The Docker image itself is genuinely build-verified now, closing the caveat in
+README.md's Quickstart ("Docker itself wasn't available in the environment these files were written
+in ... haven't been build-verified"): `docker build --target base .` succeeds cleanly on Python
+3.12-slim, `docker run --rm auto-park` (the image's default `pytest -q`) runs the full suite to
+completion in a Linux container, and `docker compose run --rm demo` builds, runs `core.demo`, and
+correctly delivers the output GIF to the host through the `./out` volume mount. Verified 2026-08-13.
+**What was actually wrong, and where**: two distinct things, found in sequence.
+1. **A real platform-sensitivity finding.** The regression test failed in the Linux container but
+   passed on a Windows host, with byte-identical numpy (2.5.2) and scipy (1.18.0) on both sides --
+   ruling out a dependency-pinning mismatch. `scipy.show_config()` on both showed the identical
+   scipy-openblas 0.3.31.dev build, `DYNAMIC_ARCH`, `Haswell` baseline, but a different compiler
+   (gcc 15.2/Windows vs. 14.2.1/Linux) and `MAX_THREADS` (24 vs. 64); OpenBLAS's `DYNAMIC_ARCH`
+   selects its actual compute kernel from the CPU it detects at runtime, which differs by
+   host/container. Pinning `OPENBLAS_NUM_THREADS=1`/`OMP_NUM_THREADS=1` was tried and made no
+   difference -- ruling out thread-order nondeterminism specifically, and pointing at the kernel
+   selection itself. `MPCController`'s SLSQP solve (gradient-based, iterative) is float-order-
+   sensitive across BLAS backends, and the original test ran on `parallel_between_cars` (already
+   entry 2's tightest-margin scenario) with the safety margin forced to exactly zero and
+   `sensor_latency_ticks=5`. Direct measurement (a signed vehicle-obstacle clearance metric, not
+   just the boolean) found the true effect size at that exact configuration was only **2-7mm**
+   across seeds 1-5 on the host -- smaller than the ~5mm swing the platform difference alone
+   produced (-2.4mm on host vs. +2.3mm in-container for the identical seed=1 case), i.e. this
+   specific config really was a coin flip, not a test-design boundary-rounding artifact.
+   `sensor_latency_ticks=10` -- still inside this scenario's own already-documented verified-safe
+   upper bound (entry 7) -- produces a consistent ~6cm penetration without the fix and >15cm
+   clearance with it, confirmed matching between host and container to within ~3mm. The test now
+   uses `latency_ticks=10` and asserts on that continuous clearance metric (with headroom on both
+   sides of zero) rather than the boolean `result.collision`.
+2. **A real bug in the rewritten test itself, caught by the fix above.** The first version of the
+   rewrite loaded one `Scenario` and reused its `scenario.vehicle` object across both the
+   "no-fix"/"with-fix" harness runs in the same test. `VehicleNode` stores the `Vehicle` it's given
+   without copying and mutates it in place every tick (`core/nodes/vehicle_node.py`'s
+   `self.vehicle.update(...)`), so the second run silently started from wherever the first run's
+   vehicle physically ended up (already mid-collision) rather than the scenario's real start pose --
+   both runs then measured the same deeply-negative clearance, masking the fix entirely. Caught
+   immediately by the new continuous assertion (the "with-fix" run's clearance failed instead of
+   trivially passing); fixed by reloading `load_scenario(...)` fresh inside each closure call.
+**What would close it further**: nothing outstanding -- the underlying app behavior (the latency
+margin fix) was never actually broken; only this one test's construction was fragile, on two
+independent axes, both now fixed.
+
 ## Testing coverage gaps (not bugs, but relevant context)
 
 Closed. `test_sensors.py` (hand-computed ray/circle intersection cases: dead ahead, out of range,
