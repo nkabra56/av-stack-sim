@@ -7,11 +7,13 @@ causing behavior, or a documented scope limitation that would surface as a real 
 conditions it's currently exercised under. Each entry links to where it's already discussed in more
 depth and what would need to happen to close it.
 
-There are currently no known reproducible safety bugs — the two that used to be tracked here
-(Pure Pursuit colliding on `parallel_between_cars`, and MPC-ACC's gap constraint going infeasible in
-standstill-recovery) are both fixed; see entry 2 below and `core/control/acc.py`'s
+There are no known reproducible safety bugs under normal usage — the two that used to be tracked
+here (Pure Pursuit colliding on `parallel_between_cars`, and MPC-ACC's gap constraint going
+infeasible in standstill-recovery) are both fixed; see entry 2 below and `core/control/acc.py`'s
 `MpcAccController._effective_min_gap` docstring, respectively, for what changed and what residual,
-non-bug behavior remains.
+non-bug behavior remains. Entry 7 is a real, reproducible collision, but only under an opt-in
+testing feature (`sensor_latency_ticks`) pushed well beyond its verified-safe range — off by
+default, and every existing scenario/test runs with it off.
 
 ## Scope limitations that would surface as real problems outside current usage
 
@@ -241,10 +243,47 @@ than t=30s to fairly account for this (documented in the test itself, not silent
 finding, not a hidden regression: the RMS/min-gap figures reported in DESIGN.md's H5 entry shifted
 somewhat with the new (genuinely different) real leader, both noted there.
 
+### 7. Parking mode has no notion of sensor dropout/latency — partially closed
+
+**Where**: `core/nodes/sensor_node.py` (dropout/latency modeling itself), `core/nodes/controller_node.py`
+(`latency_margin`), `core/harness.py` (derives it).
+**Status**: the capability itself is built (DESIGN.md section 10's future-extensions list) --
+`SensorNode` can independently drop each tick's messages (`dropout_prob`, never arrives) or delay
+them (`latency_ticks`, arrives late with the value it actually had when computed, not a stale
+recompute). Both default to off, so every pre-existing caller is byte-for-byte unaffected --
+verified directly, not just assumed: the RNG draw that gates dropout is skipped entirely (not just
+guaranteed to never fire) when `dropout_prob == 0.0`, so the noise-sample sequence every other test
+depends on is untouched.
+**A real bug found and fixed while validating it**: a sweep across all 5 scenarios, both
+controllers, 5 seeds each found dropout genuinely safe up to at least 0.4 (0 collisions), but
+latency caused real collisions starting at just 5 ticks (0.5s) -- `ControllerNode`'s reactive speed
+governor was trusting a delayed `obstacle_ranges` reading as if it reflected the *current* gap, when
+it could be reporting a gap from `latency_ticks` ago, before the vehicle closed more distance toward
+it. Fixed with `latency_margin` -- an extra, worst-case-derived subtraction from the governor's gap
+calculation (`sensor_latency_ticks * dt * v_max`, the most distance closeable during the delay at
+the vehicle's own top speed), following the exact same "physics-derived margin" pattern entry 2's
+`stopping_buffer` already established for the one-tick sense-decide-act latency. Verified: 0
+collisions at latency_ticks<=10 across the full sweep after the fix (previously 4/25 at
+latency_ticks=5 alone), and a direct regression test confirms the specific fix is load-bearing (the
+same case collides with `latency_margin` forced back to 0).
+**What's still open**: latency beyond ~10-20 ticks (1-2s) can still cause real collisions, through a
+*different* mechanism the margin fix can't reach -- delayed EKF corrections (compass/position_fix/
+landmark_bearings are subject to the same `latency_ticks`) let dead-reckoning drift accumulate for
+longer between fixes, and a reactive controller (Pure Pursuit most of all, consistent with its
+already-documented curvature-saturation fragility -- entry 2) can steer the *true* vehicle into an
+obstacle the *estimated* vehicle would have cleared. Confirmed directly, not just inferred: one such
+run's true/estimated position error reached 2.7-4.0m in the ticks immediately before collision.
+**What would close it**: proper out-of-sequence-measurement handling in the EKF (fuse a delayed
+correction against the state *as it was* when the measurement was actually taken, not the current
+state, then re-propagate forward -- a well-established estimation technique, but a materially bigger
+feature than a stopping-buffer margin). `tests/test_sensor_robustness.py` pins the currently-verified-
+safe range (dropout_prob<=0.2, latency_ticks<=10) as a real regression test, not just a claim.
+
 ## Testing coverage gaps (not bugs, but relevant context)
 
-`test_sensors.py` (hand-computed ray/circle intersection cases) and `test_control.py` (controller
-convergence from a straight-line path) are both still on the "planned, not built" list in
-IMPLEMENTATION.md section 4 — current coverage for both areas is integration-level only, via
-`test_simulation.py`. Nothing is known to be broken here; it just hasn't been unit-tested in
-isolation, so a regression in either area would currently only be caught indirectly.
+Closed. `test_sensors.py` (hand-computed ray/circle intersection cases: dead ahead, out of range,
+behind the beam, off to the side, tangent, nearest-of-several, beam-angle composition with vehicle
+heading) and `test_control.py` (Pure Pursuit/MPC convergence from directly on a straight path and
+from a lateral offset, decoupled from any planner or the estimation stack) both now exist.
+`test_simulation.py`'s integration-level coverage remains, unchanged, as the end-to-end check on
+top of them.

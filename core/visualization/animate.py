@@ -1,10 +1,24 @@
-"""Matplotlib top-down animation of a parking run.
+"""Matplotlib animation of a parking run: a top-down view plus two live telemetry
+panels (IMPLEMENTATION.md's M5 milestone).
 
-Shows the planned path (light gray), the true trajectory (solid blue, vehicle drawn at
-its true pose -- since that's what actually happened), the EKF's estimated trajectory
-(dashed orange), and a 1-sigma position-uncertainty ellipse around the estimate. The
-gap between the solid and dashed lines *is* the estimation error -- the whole point of
-having an estimator is visible directly in the animation, not just in a metrics table.
+Top-down (left, larger): the planned path (light gray), the true trajectory (solid
+blue, vehicle drawn at its true pose -- since that's what actually happened), the
+EKF's estimated trajectory (dashed orange), and a 1-sigma position-uncertainty ellipse
+around the estimate. The gap between the solid and dashed lines *is* the estimation
+error -- the whole point of having an estimator is visible directly in the animation,
+not just in a metrics table.
+
+Speed profile (top right): commanded speed vs. time, filling in as the run
+progresses, with a marker at the current tick -- makes the speed governor's throttling
+(KNOWN_BUGS.md entries 2/3) visible as a real dip in the trace, not just inferable
+from the vehicle slowing down on screen.
+
+Sensor readings (bottom right, polar): each ultrasonic beam's current range as a bar
+at its angle (relative to the vehicle's own heading, so the fan rotates rigidly with
+the vehicle exactly like the real body-frame sensor does), radius clamped to the
+sensor's own max_range. A beam that's clear reads at the rim; an obstacle closing in
+shows up as a bar shortening toward the center, in whichever direction it's actually
+approaching from.
 """
 
 import matplotlib.pyplot as plt
@@ -54,8 +68,13 @@ def render_animation(
         print(f"No trajectory to animate for '{title}' — controller halted before the first step.")
         return
 
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.set_title(title)
+    fig = plt.figure(figsize=(11, 6))
+    grid = fig.add_gridspec(2, 2, width_ratios=[2, 1])
+    ax = fig.add_subplot(grid[:, 0])
+    ax_speed = fig.add_subplot(grid[0, 1])
+    ax_sensor = fig.add_subplot(grid[1, 1], projection="polar")
+
+    fig.suptitle(title)
     ax.set_aspect("equal", "box")
 
     for obstacle in environment.obstacles:
@@ -93,6 +112,37 @@ def render_animation(
     true_history = result.true_history
     est_history = result.estimated_history
     cov_history = result.covariance_history
+    n = len(true_history)
+
+    # Speed profile: commanded v vs. time, filling in as the run progresses.
+    has_speed = result.controls is not None and len(result.controls)
+    times = np.arange(n) * result.dt
+    speeds = result.controls[:, 0] if has_speed else np.zeros(n)
+    ax_speed.set_title("speed", fontsize=9)
+    ax_speed.set_xlabel("t (s)", fontsize=8)
+    ax_speed.set_ylabel("v (m/s)", fontsize=8)
+    ax_speed.tick_params(labelsize=7)
+    if n > 1:
+        ax_speed.set_xlim(0, times[-1])
+    v_pad = max(0.1, 0.1 * np.abs(speeds).max()) if len(speeds) else 0.1
+    ax_speed.set_ylim(speeds.min() - v_pad if len(speeds) else -0.1, speeds.max() + v_pad if len(speeds) else 0.1)
+    speed_trail, = ax_speed.plot([], [], "-", lw=1.5, color="tab:blue")
+    speed_dot, = ax_speed.plot([], [], "o", ms=4, color="tab:blue")
+
+    # Sensor readings: one bar per beam, at its angle relative to the vehicle's own
+    # heading (the polar axes rotate with the vehicle each frame, not the world).
+    has_sensor = result.sensor_angles is not None and len(result.sensor_angles)
+    sensor_angles = result.sensor_angles if has_sensor else np.array([])
+    sensor_ranges = result.sensor_ranges if has_sensor else np.zeros((n, 0))
+    max_range = float(sensor_ranges.max()) if sensor_ranges.size else 1.0
+    ax_sensor.set_title("ultrasonic ranges", fontsize=9, pad=12)
+    ax_sensor.set_theta_zero_location("N")  # forward = up, matching the top-down view's "ahead"
+    ax_sensor.set_ylim(0, max_range)
+    ax_sensor.tick_params(labelsize=6)
+    bar_width = (2 * np.pi / len(sensor_angles) * 0.8) if len(sensor_angles) else 0.1
+    sensor_bars = ax_sensor.bar(
+        sensor_angles, np.zeros(len(sensor_angles)), width=bar_width, color="tab:green", alpha=0.7,
+    )
 
     def update(i):
         x, y, theta = true_history[i]
@@ -108,9 +158,16 @@ def render_animation(
         uncertainty_ellipse.height = height
         uncertainty_ellipse.angle = angle
 
-        return vehicle_patch, true_trail, est_trail, uncertainty_ellipse
+        speed_trail.set_data(times[: i + 1], speeds[: i + 1])
+        speed_dot.set_data([times[i]], [speeds[i]])
 
-    anim = FuncAnimation(fig, update, frames=len(true_history), interval=50, blit=True)
+        for bar, r in zip(sensor_bars, sensor_ranges[i] if len(sensor_ranges) else []):
+            bar.set_height(r)
+
+        return (vehicle_patch, true_trail, est_trail, uncertainty_ellipse, speed_trail, speed_dot, *sensor_bars)
+
+    anim = FuncAnimation(fig, update, frames=n, interval=50, blit=False)
+    fig.tight_layout()
 
     if save_path:
         anim.save(save_path, writer=PillowWriter(fps=20))

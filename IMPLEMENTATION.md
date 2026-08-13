@@ -126,12 +126,31 @@ core/
 tests/
   test_vehicle.py
   test_bus.py
+  test_sensors.py         # UltrasonicArray: hand-computed ray/circle intersection cases
+                       # (dead ahead, out of range, behind the beam, tangent, nearest-of-several)
+  test_control.py         # Pure Pursuit/MPC convergence on a straight line + lateral offset,
+                       # decoupled from any planner or the estimation stack
   test_ekf.py
+  test_ukf.py             # DESIGN.md section 10: UKF alternative to the EKF -- same closed-form-arc
+                       # and filter-consistency checks as test_ekf.py, plus circular-mean handling
+  test_ukf_comparison.py    # the actual EKF-vs-UKF head-to-head numbers, pinned as a regression
   test_kitti_ekf_validation.py  # EKF vs. dead-reckoning-only on the committed real KITTI excerpt
   test_planning.py        # endpoint + curvature checks (both planners), obstacle-clearance
                        # check (Hybrid A* only) -- see DESIGN.md section 6's M2 entry
   test_mpc.py            # parking MPCController: falls back to the warm-started plan, not a
                        # fresh unconverged solve, when SLSQP doesn't converge
+  test_sensor_node.py      # SensorNode dropout/latency modeling (DESIGN.md section 10,
+                       # KNOWN_BUGS.md entry 7): delivery gating and delayed-message timing, direct
+  test_sensor_robustness.py  # closed-loop collision safety under dropout/latency across real
+                       # scenarios; pins the verified-safe range and the latency_margin fix itself
+  test_parking_env.py      # DESIGN.md section 10: ParkingEnv's Gym contract (gymnasium's own
+                       # check_env), reward shape, collision/success termination -- fast, no training
+  test_rl_training.py      # PPO trains end to end on ParkingEnv without crashing (a smoke test,
+                       # not a convergence claim -- see core/validation/rl_comparison.py for that)
+  test_rl_comparison.py    # real, measured RL-vs-baseline numbers against a committed trained
+                       # policy (core/data/rl/) -- fast, evaluates only, no training
+  test_ros2_bridge.py      # message-conversion functions + Ros2Bridge's wiring, against fakes --
+                       # see ros2_bridge.py's own docstring for what is/isn't verified and why
   test_simulation.py       # integration tests, harness-based, across scenarios x controllers x seeds
   test_acc.py            # IDM/MPC-ACC unit + synthetic braking-lead scenario checks
   test_acc_validation.py    # IDM/MPC-ACC vs. real NGSIM data: safety, plausibility, determinism
@@ -362,15 +381,28 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   tracking-aware buffer while accurately following a path a planner already verified, derived from
   the planner's own `safety_margin` via `ParkingHarness` (see controller_node.py's "Tracking-aware
   buffer" docstring entry and KNOWN_BUGS.md entry 3 for the real parameter sweep this took).
-- **M5 — Visualization polish**: `visualization/animate.py` now shows true vs. estimated
-  trajectory, a covariance ellipse, and the planned path (landed as part of ME, since the whole
-  point of adding an estimator is visible directly in that comparison). Still open: a genuinely
-  multi-panel layout (live sensor readings, speed profile) alongside the top-down view.
-- **M6 — Tests & CI**: 214 tests across both modes run in ~180s; no GitHub Actions workflow yet.
+- **M5 — Visualization polish: done.** `visualization/animate.py` shows true vs. estimated
+  trajectory, a covariance ellipse, and the planned path on the top-down view (landed as part of
+  ME, since the whole point of adding an estimator is visible directly in that comparison), plus
+  two live telemetry panels added afterward: a speed-vs-time trace (the speed governor's
+  throttling -- KNOWN_BUGS.md entries 2/3 -- is now visible as a real dip in the line, not just
+  inferable from the vehicle slowing down on screen) and a polar ultrasonic-range display, one bar
+  per beam at its angle relative to the vehicle's own heading, so the fan rotates rigidly with the
+  vehicle the same way the real body-frame sensor does. `SimulationResult` gained `sensor_ranges`/
+  `sensor_angles`/`dt` fields to carry the per-tick beam data out of `ParkingHarness.run()`
+  (previously only `ControllerNode` ever saw obstacle_ranges; the harness now also subscribes to
+  record a history, the same pattern it already used for true/estimated pose and covariance).
+  Verified by rendering three real scenarios end to end (open lane, obstacle-flanked, and a full
+  parallel-parking maneuver) and inspecting individual frames: the speed panel shows the governor's
+  real oscillation during a tight reverse-forward sequence, and the sensor panel visibly shortens a
+  beam exactly when the vehicle is close to an obstacle in that beam's direction, not just at rest.
+- **M6 — Tests & CI**: 286 tests across both modes run in ~250s (with the optional `rl` extra
+  installed; without it, `test_parking_env.py`/`test_rl_training.py`/`test_rl_comparison.py` skip
+  via `pytest.importorskip`); no GitHub Actions workflow yet.
 
 ## 4. Testing strategy
 
-Current (214 tests, ~180s -- up from ~100s pre-H5, almost entirely because `test_full_highway.py`
+Current (286 tests, ~250s -- up from ~100s pre-H5, almost entirely because `test_full_highway.py`
 replays a real 78s/780-frame NGSIM trajectory through the full node graph, parametrized over
 multiple controllers and seeds; the M2-era jump from ~20s to ~100s is explained in
 IMPLEMENTATION.md's M2 section above):
@@ -439,13 +471,8 @@ IMPLEMENTATION.md's M2 section above):
   arrival, don't yield to the left), re-derived against this harness's own real approach dynamics
   rather than reusing H4's exact timings verbatim.
 
-Planned, still not built (currently integration-level coverage via `test_simulation.py` is
-enough, but won't scale as `sensors.py`/the controllers grow):
-
-- `test_sensors.py`: hand-computed ray/circle intersection cases (obstacle dead ahead, obstacle
-  out of range, obstacle behind the beam direction).
-- `test_control.py`: given a straight-line path and no obstacles, assert each controller's output
-  converges toward the goal within a fixed number of steps and within `tol`.
+Both `test_sensors.py` and `test_control.py` (below) closed this gap -- `test_simulation.py`'s
+integration-level coverage remains, unchanged, as the end-to-end check on top of them.
 
 ## 5. Dependencies & running
 

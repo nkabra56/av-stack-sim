@@ -123,11 +123,28 @@ class ControllerNode:
         stopping_buffer: float = 0.5,
         tracked_stopping_buffer: float | None = None,
         tracking_threshold: float = 0.03,
+        latency_margin: float = 0.0,
     ):
         self.bus = bus
         self.controller = controller
         self.a_max = a_max
         self._stall_ticks = 0
+        # Worst-case extra distance the gap could have shrunk while an obstacle_ranges
+        # reading was still in flight, beyond the one-tick sense-decide-act latency
+        # `stopping_buffer` already absorbs (see its own comment below) -- a real,
+        # measured gap, not a hypothetical one: SensorNode's `latency_ticks` (DESIGN.md
+        # section 10's future-extensions list) delays a reading `latency_ticks` ticks
+        # past when it was actually taken, so the closest_range this governor sees can
+        # be reporting where an obstacle was that many ticks ago, not where the gap
+        # actually is now. A sweep of real closed-loop runs under sensor latency found
+        # genuine collisions starting at latency_ticks=5 (4/25) with `latency_margin=0`
+        # -- the reactive governor was trusting a stale, too-generous gap and computing
+        # an unsafe `v_allowed` from it. `ParkingHarness` derives this from
+        # `sensor_latency_ticks * dt * v_max` (the most distance the vehicle could have
+        # closed during the delay, at its own top speed) when latency is enabled;
+        # 0.0 (default, and what every pre-existing caller gets) is exactly the
+        # original behavior.
+        self.latency_margin = latency_margin
         # Extra cushion beyond the exact kinematic stopping distance, to absorb the one-tick
         # sense-decide-act latency (obstacle_ranges is read at tick t, but the resulting slower
         # command isn't actually applied by VehicleNode until tick t+1) and the fact that
@@ -203,7 +220,7 @@ class ControllerNode:
         # closest_range is measured from the vehicle's own center to the obstacle's surface (see
         # UltrasonicArray), so the body-to-body gap still available to brake within is
         # closest_range - VEHICLE_RADIUS, not closest_range itself.
-        gap = closest_range - VEHICLE_RADIUS - self._effective_buffer()
+        gap = closest_range - VEHICLE_RADIUS - self._effective_buffer() - self.latency_margin
         return math.sqrt(2 * self.a_max * gap) if gap > 0 else 0.0
 
     def _note_stall(self, stalled: bool) -> None:

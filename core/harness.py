@@ -21,7 +21,7 @@ from core.environment import VEHICLE_RADIUS, Environment
 from core.estimation.ekf import ExtendedKalmanFilter
 from core.interfaces import Controller, Planner
 from core.messaging.bus import Bus
-from core.messaging.messages import PathMsg, PoseEstimateMsg, TrueStateMsg
+from core.messaging.messages import ObstacleRangeMsg, PathMsg, PoseEstimateMsg, TrueStateMsg
 from core.nodes.controller_node import ControllerNode
 from core.nodes.estimator_node import EstimatorNode
 from core.nodes.planner_node import PlannerNode
@@ -48,6 +48,14 @@ class SimulationResult:
     success: bool
     collision: bool
     path: np.ndarray = field(repr=False, default=None)  # planned (M, 3) path, for plotting
+    sensor_ranges: np.ndarray = field(repr=False, default=None)  # (N, num_beams) ultrasonic
+    # readings at each tick, column order matching sensor_angles -- for M5's live sensor
+    # readings panel (visualization/animate.py). A beam that saw nothing reads max_range,
+    # same "no different from far away" convention obstacle_ranges itself already uses.
+    sensor_angles: np.ndarray = field(repr=False, default=None)  # (num_beams,) rad, relative
+    # to vehicle heading -- DEFAULT_SENSOR_ANGLES below unless the harness was built with
+    # a different UltrasonicArray.
+    dt: float = 0.1  # seconds per tick, for the speed-profile panel's time axis
 
 
 class ParkingHarness:
@@ -85,15 +93,26 @@ class ParkingHarness:
         # 0.4 held 0/25 collisions with 23/25 full completions across seeds 1-25 (the 2
         # non-completions are the already-documented max_replans residual, not unsafe).
         tracking_threshold: float = 0.03,  # see ControllerNode's constructor docstring
+        sensor_dropout_prob: float = 0.0,  # see SensorNode's module docstring (DESIGN.md
+        # section 10's sensor dropout/latency future-extension). 0.0 (default) is exactly
+        # the pre-existing behavior -- every measurement always arrives, same as before
+        # this parameter existed.
+        sensor_latency_ticks: int = 0,
     ):
         self.environment = environment
         self.tol = tol
+        self.dt = dt
         self.bus = Bus()
         rng = np.random.default_rng(seed)
 
         self.vehicle_node = VehicleNode(self.bus, vehicle, dt, rng, v_max=v_max, a_max=a_max, k_acc=k_acc)
         ultrasonic = UltrasonicArray(angles=DEFAULT_SENSOR_ANGLES, max_range=8.0)
-        self.sensor_node = SensorNode(self.bus, ultrasonic, environment, rng)
+        self.sensor_node = SensorNode(
+            self.bus, ultrasonic, environment, rng,
+            dropout_prob=sensor_dropout_prob, latency_ticks=sensor_latency_ticks,
+        )
+        self.sensor_angles = np.array(ultrasonic.angles)
+        self._sensor_max_range = ultrasonic.max_range
 
         # Only planners that actually guarantee an obstacle clearance while being tracked
         # (HybridAStarPlanner's `safety_margin`) earn a smaller tracked-buffer; planners with
@@ -118,9 +137,14 @@ class ParkingHarness:
         )
         self.estimator_node = EstimatorNode(self.bus, ekf, environment)
         self.planner_node = PlannerNode(self.bus, planner, environment, vehicle.turning_radius, max_replans=max_replans)
+        # Worst-case gap erosion during an in-flight obstacle_ranges reading -- see
+        # ControllerNode's `latency_margin` docstring. Zero (unchanged behavior) unless
+        # sensor_latency_ticks is actually enabled.
+        latency_margin = sensor_latency_ticks * dt * v_max
         self.controller_node = ControllerNode(
             self.bus, controller, a_max=a_max, stopping_buffer=stopping_buffer,
             tracked_stopping_buffer=tracked_stopping_buffer, tracking_threshold=tracking_threshold,
+            latency_margin=latency_margin,
         )
 
         # A controller with its own internal rollout model (e.g. MPCController) has to predict
@@ -133,9 +157,11 @@ class ParkingHarness:
         self._latest_true: TrueStateMsg | None = None
         self._latest_est: PoseEstimateMsg | None = None
         self._latest_path: np.ndarray | None = None
+        self._latest_ranges: ObstacleRangeMsg | None = None
         self.bus.subscribe("true_state", self._on_true_state)
         self.bus.subscribe("pose_estimate", self._on_pose_estimate)
         self.bus.subscribe("path", self._on_path)
+        self.bus.subscribe("obstacle_ranges", self._on_obstacle_ranges)
 
     def _on_true_state(self, msg: TrueStateMsg) -> None:
         self._latest_true = msg
@@ -145,6 +171,9 @@ class ParkingHarness:
 
     def _on_path(self, msg: PathMsg) -> None:
         self._latest_path = msg.path
+
+    def _on_obstacle_ranges(self, msg: ObstacleRangeMsg) -> None:
+        self._latest_ranges = msg
 
     def _collided(self, ts: TrueStateMsg) -> bool:
         for obstacle in self.environment.obstacles:
@@ -164,6 +193,7 @@ class ParkingHarness:
         est_history: list[tuple[float, float, float]] = []
         cov_history: list[np.ndarray] = []
         controls: list[tuple[float, float]] = []
+        ranges_history: list[list[float]] = []
         collision = False
 
         for tick in range(max_steps):
@@ -182,6 +212,8 @@ class ParkingHarness:
             else:
                 est_history.append((ts.x, ts.y, ts.theta))
                 cov_history.append(np.zeros((3, 3)))
+            readings = self._latest_ranges.readings if self._latest_ranges is not None else {}
+            ranges_history.append([readings.get(a, self._sensor_max_range) for a in self.sensor_angles])
 
             if self._collided(ts):
                 collision = True
@@ -193,6 +225,7 @@ class ParkingHarness:
         est_arr = np.array(est_history) if est_history else np.zeros((0, 3))
         cov_arr = np.array(cov_history) if cov_history else np.zeros((0, 3, 3))
         controls_arr = np.array(controls) if controls else np.zeros((0, 2))
+        ranges_arr = np.array(ranges_history) if ranges_history else np.zeros((0, len(self.sensor_angles)))
 
         success = (
             not collision
@@ -200,4 +233,7 @@ class ParkingHarness:
             and np.hypot(self.environment.spot.x - true_arr[-1, 0], self.environment.spot.y - true_arr[-1, 1])
             < self.tol
         )
-        return SimulationResult(true_arr, est_arr, cov_arr, controls_arr, success, collision, self._latest_path)
+        return SimulationResult(
+            true_arr, est_arr, cov_arr, controls_arr, success, collision, self._latest_path,
+            sensor_ranges=ranges_arr, sensor_angles=self.sensor_angles, dt=self.dt,
+        )

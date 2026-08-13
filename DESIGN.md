@@ -436,20 +436,62 @@ selectable per scenario via `demo.py --controller mpc`.
 
 ## 10. Future extensions
 
-- Learned parking policy (RL, e.g. trained via a simple gym-style wrapper around the simulation)
-  compared against the planner+controller baseline.
-- Dynamic obstacles (other vehicles, pedestrians) requiring re-planning mid-maneuver.
-- Sensor dropout/latency modeling, to test the estimator's (and controller's) robustness when a
-  measurement is late or simply doesn't arrive, not just when it's noisy.
-- Particle filter or UKF as an alternative to the EKF, for a genuine multi-modal or
-  strongly-nonlinear comparison point (the EKF's linearization is a fine approximation at these
-  turning rates, but it's an approximation, and demonstrating *why* it's usually good enough here
-  — rather than just asserting it — would be a stronger claim than the current filter-consistency
-  test alone provides).
-- ROS2 bridge: the node/topic boundaries in `core/nodes/` and `core/messaging/` were
-  drawn deliberately close to how a real ROS2 graph would be structured, specifically so that
-  swapping the in-process `Bus` for real ROS2 topics later wouldn't require redesigning the nodes
-  themselves — only how they publish/subscribe.
+- ~~Learned parking policy (RL)~~: built. `core/rl/parking_env.py`'s `ParkingEnv` (a Gymnasium
+  environment, ground-truth state, no Bus/EKF graph) wraps a single end-to-end policy -- raw
+  sensing + goal offset in, `(v, delta)` out directly, no explicit path plan at all -- trained with
+  PPO (Stable-Baselines3, pulling in `torch`; kept as an opt-in `rl` extra in `pyproject.toml`, not
+  a core dependency, given this project's dependency-light precedent everywhere else). **Measured
+  against the real baseline** (`core/validation/rl_comparison.py`, `core/data/rl/PROVENANCE.md` has
+  the full numbers): on both an obstacle-free scenario and one with two real parked-car obstacles to
+  route around, the trained policy reaches the goal 100% of the time across 5 seeds, never collides,
+  and does it in ~65 steps versus the baseline's 261-365 -- genuinely reaches the goal reliably and
+  safely, not just moves toward it. **Important caveat, not glossed over**: this isn't a fair fight
+  in the baseline's favor -- the policy trains and is evaluated on ground truth (no sensor noise the
+  baseline has to contend with), and it's only been tested on scenarios where a direct-ish path to
+  the goal is actually available, not the project's genuinely tight ones (`parallel_between_cars`,
+  `perpendicular_obstructed_lane`) that need a real detour or reverse-gear cusp. A true head-to-head
+  under identical noisy conditions, and on the scenarios that actually stress a path-planning
+  algorithm, is real follow-up work.
+- ~~Dynamic obstacles requiring re-planning mid-maneuver~~: the re-planning machinery itself is
+  built (KNOWN_BUGS.md entry 3, now closed -- stall detection triggers `PlannerNode` to re-plan
+  against the live obstacle list, verified end-to-end with a real closed-loop recovery). What's
+  still missing is genuinely *moving* obstacles (other vehicles, pedestrians in motion) -- entry 3's
+  scenario is a new *static* obstacle appearing mid-run once, not something that keeps moving after
+  it appears, so a re-plan never has to react to a target that's still changing.
+- ~~Sensor dropout/latency modeling~~: built (KNOWN_BUGS.md entry 7). `SensorNode` can drop each
+  tick's messages independently or delay them by a configurable number of ticks. Testing it found a
+  real bug (the reactive speed governor trusted a delayed obstacle reading as current, and collided
+  under even modest latency) and fixed it with a worst-case margin, the same pattern entry 2's
+  `stopping_buffer` already used for the base sense-decide-act latency. What's confirmed *not*
+  closed: latency beyond ~10-20 ticks still causes real collisions via a different path -- delayed
+  EKF corrections let dead-reckoning drift enough that a reactive controller can steer the true
+  vehicle somewhere the (wrongly) estimated vehicle would have cleared. Closing that needs real
+  out-of-sequence-measurement handling in the EKF, not another margin -- entry 7 has the full account.
+- ~~Particle filter or UKF as an alternative to the EKF~~: built (`core/estimation/ukf.py`) --
+  chose UKF over a particle filter since this domain never actually has a multi-modal belief (one
+  well-observed vehicle, Gaussian sensor noise, no data-association ambiguity), so the honest
+  question was specifically "strongly-nonlinear," which UKF answers directly via sigma-point
+  propagation of the *exact* nonlinear model instead of a Taylor-linearized one, while staying
+  directly comparable to the EKF (same state, same process/measurement models, same `predict`/
+  `update_*` interface). **The actual measured answer** (`core/validation/ukf_comparison.py`,
+  pinned by `tests/test_ukf_comparison.py`, not just asserted): on a real KITTI trajectory, EKF and
+  UKF RMSE differ by ~0.03% (0.891m vs. 0.891m); even at `Vehicle`'s own tightest physical turning
+  radius (~3.9m, the most nonlinear regime the kinematic model can produce, not an arbitrary
+  extreme), they differ by ~0.1% (0.138m vs. 0.138m). A supplementary sweep pushing `dt` well past
+  this project's real 0.1s confirmed the gap does grow with step size, as linearization theory
+  predicts -- so the near-identical result at real operating parameters is a genuine finding (the
+  approximation really is fine here), not a bug quietly making both filters equally wrong.
+- ~~ROS2 bridge~~: written (`core/messaging/ros2_bridge.py`), but **not verified against a real
+  ROS2 install** — flagged plainly rather than silently claimed done, unlike every other item in
+  this list. ROS2/rclpy could not be installed in this development environment: WSL2 (the standard
+  way to run ROS2 on Windows) isn't functional on this machine, and `rclpy` isn't pip-installable
+  standalone. What *is* tested (`tests/test_ros2_bridge.py`): the message-conversion functions
+  (`PoseEstimateMsg`/`ControlCmdMsg`/`ObstacleRangeMsg`/`PathMsg` → ROS2-shaped kwargs, including a
+  regression for the covariance-flattening index mapping) and `Ros2Bridge`'s subscribe → convert →
+  publish wiring, both against minimal stand-ins for `rclpy`'s `Node`/`Publisher` rather than the
+  real thing — the bridge is written against narrow `Protocol`s specifically so it never imports
+  `rclpy` at all, and stays testable without one. What's unverified is whether real `rclpy`'s actual
+  API matches those stand-ins closely enough; that needs a real ROS2 environment to check.
 
 ## 11. Adaptive cruise control (H1)
 

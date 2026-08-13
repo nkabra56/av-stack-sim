@@ -16,6 +16,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# DESIGN.md section 10's "learned parking policy" future extension. Deliberately kept
+# out of the core `dependencies` list -- torch (pulled in by stable-baselines3) is a
+# multi-GB addition, and every other capability in this project runs without it. Only
+# `core/rl/` and its tests need this group.
+rl = ["gymnasium", "stable-baselines3"]
 
 [tool.setuptools.packages.find]
 include = ["core*"]
