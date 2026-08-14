@@ -64,7 +64,8 @@ dependency) and the same `ExtendedKalmanFilter`, rather than one big direct-call
   [IMPLEMENTATION.md](IMPLEMENTATION.md#6-known-issues)'s known-issues log.
 - A tested, modular codebase — planners, controllers, and nodes are swappable behind common
   interfaces (see [IMPLEMENTATION.md](IMPLEMENTATION.md#2-key-interfaces)), not a single
-  hardcoded pipeline. 100 tests, ~22s.
+  hardcoded pipeline. 286 tests (277 without the optional `rl` extra installed, ~250s with it —
+  see [IMPLEMENTATION.md](IMPLEMENTATION.md#4-testing-strategy) for the breakdown).
 - Scenarios that are honest about current limits: two parking scenarios have a clear path and
   both controllers reach the spot reliably; three place an obstacle where the fixed Dubins path
   can't route around it, asserted safe (no collision) rather than pretending success — the gap
@@ -82,7 +83,7 @@ Python, NumPy, SciPy, Matplotlib, PyYAML, pytest.
 
 ```bash
 pip install -e .
-pytest                                                     # run the test suite (~22s, 100 tests)
+pytest                                                     # run the test suite (277 tests, or 286 with the `rl` extra)
 
 # Parking
 python -m core.demo perpendicular_open                # Pure Pursuit, show the animation
@@ -122,13 +123,12 @@ docker compose run --rm test
 docker compose run --rm demo
 ```
 
-Built and tested locally with `pip install -e .` in this repo's own development
-environment, not against these Docker images specifically -- Docker itself wasn't
-available in the environment these files were written in, so the Dockerfile/
-docker-compose.yml haven't been build-verified. They follow standard, low-risk
-patterns (an official `python:3.12-slim` base, editable install from `pyproject.toml`,
-no dependencies without prebuilt Linux wheels), but if the build fails on your
-machine, that's real signal to open an issue, not an unlikely edge case.
+Build-verified: `docker build --target base .`, `docker run --rm auto-park` (the full test
+suite), and `docker compose run --rm demo` (including the `./out` volume mount) all run clean
+in a Linux container. One test needed fixing along the way for reasons unrelated to Docker
+itself -- a razor-thin regression scenario turned out to be sensitive to which BLAS backend
+`scipy.optimize`'s SLSQP solver picks per platform; see KNOWN_BUGS.md entry 8 for the full
+account. The `rl` target (torch) wasn't separately build-verified.
 
 Other parking scenarios: `perpendicular_flanked`, `perpendicular_obstructed_lane`,
 `parallel_open`, `parallel_between_cars`.
@@ -164,15 +164,16 @@ each file is responsible for.
 ## Status
 
 **Parking**: M1 (correct baseline: Dubins planner, both controllers, realistic scenarios, tests),
-M3 (MPC), state estimation + the pub/sub node architecture, and real-data EKF validation (KITTI)
-are all done. M2 (Hybrid A* + Reeds-Shepp obstacle routing) is next.
+M2 (Hybrid A* + Reeds-Shepp obstacle-aware planning), M3 (MPC), M4 (sensing & re-planning), M5
+(visualization), state estimation + the pub/sub node architecture, and real-data EKF validation
+(KITTI) are all done. What's open: a documented sensor-latency gap beyond ~1-2s (KNOWN_BUGS.md
+entry 7) and M6's remaining piece, CI (no GitHub Actions workflow yet).
 
 **Highway**: H1 (adaptive cruise control: IDM + constrained-MPC, validated against real NGSIM
 data), H2 (fused ego speed via the same EKF, extended without touching its already-validated
-3-state parking path), and H3 (lane centering: Stanley control against a real derived NGSIM lane
-geometry) are done. H4 (intersection navigation) is next. Combining H1/H2's ACC with H3's lane
-centering into one closed loop over a single vehicle is real follow-up work, not done yet — see
-IMPLEMENTATION.md's H3 milestone entry.
+3-state parking path), H3 (lane centering: Stanley control against a real derived NGSIM lane
+geometry), H4 (intersection navigation, including turning movements), and H5 (the full closed-loop
+drive composing H1-H4 onto one vehicle) are all done.
 
 See the milestone list in [IMPLEMENTATION.md](IMPLEMENTATION.md#3-milestones) and DESIGN.md's
 [highway-mode roadmap](DESIGN.md#12-highway-mode-roadmap-h2-h4) for full progress, and the

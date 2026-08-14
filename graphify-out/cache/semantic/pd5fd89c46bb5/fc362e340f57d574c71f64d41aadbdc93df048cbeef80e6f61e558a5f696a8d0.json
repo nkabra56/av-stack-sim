@@ -1,0 +1,1 @@
+{"nodes": [{"id": "core_data_kitti_excerpt_poses", "label": "KITTI Excerpt Poses (seq 09, frames 840-1139)", "file_type": "document", "source_file": "core/data/kitti/excerpt_poses.txt", "source_location": null, "source_url": null, "captured_at": null, "author": null, "contributor": null}], "edges": [], "hyperedges": []}
