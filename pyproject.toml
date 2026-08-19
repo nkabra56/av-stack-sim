@@ -21,6 +21,10 @@ dev = ["pytest"]
 # multi-GB addition, and every other capability in this project runs without it. Only
 # `core/rl/` and its tests need this group.
 rl = ["gymnasium", "stable-baselines3"]
+# Optional 3D visualization export (core/visualization/foxglove_export.py) as an
+# additive alternative to the default Matplotlib animation -- same "opt-in, not
+# core" rationale as `rl` above. Only core/demo.py's --foxglove flag needs this.
+viz = ["foxglove-sdk"]
 
 [tool.setuptools.packages.find]
 include = ["core*"]

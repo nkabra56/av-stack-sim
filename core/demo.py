@@ -44,6 +44,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--seed", type=int, default=None, help="Override the scenario's RNG seed")
     parser.add_argument("--save", metavar="PATH", help="Save the animation as a GIF instead of showing it")
+    parser.add_argument(
+        "--foxglove",
+        metavar="PATH.mcap",
+        help="Export a 3D scene for Foxglove instead of the matplotlib animation (needs `pip install -e \".[viz]\"`)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -64,9 +69,13 @@ def main(argv: list[str] | None = None) -> None:
         f"in {len(result.true_history)} steps"
     )
 
-    render_animation(
-        result, scenario.environment, title=f"{scenario.name} ({args.planner}/{args.controller})", save_path=args.save
-    )
+    title = f"{scenario.name} ({args.planner}/{args.controller})"
+    if args.foxglove:
+        from core.visualization.foxglove_export import render_foxglove
+
+        render_foxglove(result, scenario.environment, title=title, save_path=args.foxglove)
+    else:
+        render_animation(result, scenario.environment, title=title, save_path=args.save)
 
 
 if __name__ == "__main__":

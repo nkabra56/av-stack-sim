@@ -90,6 +90,7 @@ python -m core.demo perpendicular_open                # Pure Pursuit, show the a
 python -m core.demo perpendicular_open --controller mpc   # MPC instead
 python -m core.demo perpendicular_open --seed 7             # different noise realization
 python -m core.demo perpendicular_open --save out.gif      # save a GIF
+python -m core.demo perpendicular_open --foxglove out/demo.mcap  # 3D scene, see below (needs `pip install -e ".[viz]"`)
 python -m core.validation.kitti_ekf_validation --plot out.png   # EKF vs. real KITTI data
 
 # Highway: adaptive cruise control
@@ -132,6 +133,31 @@ account. The `rl` target (torch) wasn't separately build-verified.
 
 Other parking scenarios: `perpendicular_flanked`, `perpendicular_obstructed_lane`,
 `parallel_open`, `parallel_between_cars`.
+
+### 3D visualization (Foxglove)
+
+`core/visualization/foxglove_export.py` is an additive alternative to the default Matplotlib
+animation: it writes an MCAP file (`--foxglove out/demo.mcap`) driving a 3D scene — the ego
+vehicle, obstacles, the parking spot, true/EKF-estimated trajectories, the 1-sigma uncertainty
+ellipse, and a live ultrasonic sensor fan — instead of a 2D top-down plot. Needs the optional
+`viz` extra (`pip install -e ".[viz]"`, pulls in `foxglove-sdk`; the default install/Docker
+image doesn't need it, same "opt-in" pattern as the `rl` extra below).
+
+To turn this into a showcase video:
+
+1. `pip install -e ".[viz]"` then `python -m core.demo perpendicular_open --foxglove out/demo.mcap`.
+2. Install the free [Foxglove desktop app](https://foxglove.dev/download) (separate manual
+   install, not part of this repo) and open `out/demo.mcap`.
+3. Add a **3D** panel, and in its settings set the target/follow frame to `vehicle` with a
+   Position + Rotation follow mode — the camera then tracks the car through the whole maneuver
+   instead of sitting on a fixed view. Optionally add a **Plot** panel wired to `/speed.v` /
+   `/speed.delta` and another to the `/sensors.*` fields for live telemetry alongside the 3D
+   view, matching what the Matplotlib animation's side panels show. Save this as a layout (e.g.
+   export it to `foxglove-layouts/parking_demo.json`) so it's a one-click load next time.
+4. Hit play, and **screen-record the app window** (OBS Studio, Windows Game Bar, etc.) — Foxglove's
+   built-in "Export video" command is Enterprise-plan only, so this is the practical path to an
+   actual video file on the free tier. No ffmpeg needed for this path (ffmpeg is only relevant to
+   the `--save out.gif` path above, and isn't required for that either — it's Pillow-based).
 
 ## Project structure
 
