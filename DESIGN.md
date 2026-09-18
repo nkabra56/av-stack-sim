@@ -41,7 +41,7 @@ flowchart LR
     SN -- compass --> EN
     SN -- position_fix --> EN
     SN -- landmark_bearings --> EN
-    EN -- pose_estimate --> PN[PlannerNode<br/>Dubins now / Hybrid A* next]
+    EN -- pose_estimate --> PN[PlannerNode<br/>Dubins / Reeds-Shepp / Hybrid A*]
     EN -- pose_estimate --> CN[ControllerNode<br/>Pure Pursuit / MPC]
     PN -- path --> CN
     SN -- obstacle_ranges --> CN

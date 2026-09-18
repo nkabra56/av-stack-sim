@@ -20,10 +20,40 @@ view shows the planned path (gray), true trajectory (blue), EKF-estimated trajec
 with its 1σ uncertainty ellipse), and live ultrasonic sensor fan, alongside the live speed
 profile. See [more scenarios below](#results), including the reverse-cusp parallel-parking case.*
 
-**Contents:** [What this demonstrates](#what-this-demonstrates) ·
+**Contents:** [Architecture](#architecture) · [What this demonstrates](#what-this-demonstrates) ·
 [Results](#results) · [Tech stack](#tech-stack) · [Quickstart](#quickstart) ·
 [Docker](#docker) · [3D visualization](#3d-visualization-foxglove) ·
 [Project structure](#project-structure) · [Status](#status)
+
+## Architecture
+
+Parking mode's node graph — highway mode follows the identical pub/sub pattern, composing more
+nodes (ACC, lane centering, intersection navigation) onto one `Vehicle` via a
+`LongitudinalArbiterNode` that takes the more conservative of any competing accel commands. Full
+diagram and tick order in [DESIGN.md](DESIGN.md#2-system-architecture).
+
+```mermaid
+flowchart LR
+    VN["VehicleNode<br/>ground truth"] -- true_state --> SN[SensorNode]
+    VN -- odometry --> EN["EstimatorNode<br/>ExtendedKalmanFilter"]
+    SN -- "compass / position_fix<br/>/ landmark_bearings" --> EN
+    EN -- pose_estimate --> PN["PlannerNode<br/>Dubins / Reeds-Shepp / Hybrid A*"]
+    EN -- pose_estimate --> CN["ControllerNode<br/>Pure Pursuit / MPC"]
+    PN -- path --> CN
+    SN -- obstacle_ranges --> CN
+    CN -- control_cmd --> VN
+
+    style VN fill:#fde2e2,stroke:#c0392b
+    style SN fill:#e2f0fd,stroke:#2980b9
+    style EN fill:#e2f0fd,stroke:#2980b9
+    style PN fill:#e2f0fd,stroke:#2980b9
+    style CN fill:#e2f0fd,stroke:#2980b9
+```
+
+Nodes talk only through named topics and typed messages, never direct references — and
+`true_state` (red) is wired to `SensorNode` alone. `PlannerNode`/`ControllerNode` (blue) act only
+on `pose_estimate`: swap in a new planner or controller by satisfying `Planner`/`Controller`
+(`interfaces.py`) and nothing else in the graph changes.
 
 ## What this demonstrates
 
