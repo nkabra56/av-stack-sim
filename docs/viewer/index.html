@@ -576,7 +576,7 @@ async function main() {
       place(new THREE.Vector3(cx, cy, 0), Math.min(fit, 1800), s.kind === "parking" ? 52 : 60, -Math.PI / 2 - 0.5);
     } else if (mode === "follow") {
       const [d, el] = FOLLOW[s.kind];
-      place(new THREE.Vector3(lead.position.x, lead.position.y, 0.6), d, el, heading + Math.PI);
+      place(new THREE.Vector3(lead.position.x, lead.position.y, 0.6), d * Math.max(1, 1.1 / camera.aspect), el, heading + Math.PI);
     } else if (s.kind === "parking") {
       place(new THREE.Vector3(cx, cy, 0), Math.min(fit, 1800), 89, -Math.PI / 2);
     } else {
