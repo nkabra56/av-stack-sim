@@ -2,8 +2,8 @@
 uncertainty ellipse) plus speed and polar ultrasonic-sensor panels. IMPLEMENTATION.md's M5 milestone."""
 
 import matplotlib.pyplot as plt
-import matplotlib.transforms as transforms
 import numpy as np
+from matplotlib import transforms
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.patches import Circle, Ellipse, Rectangle
 
@@ -140,7 +140,7 @@ def render_animation(
         speed_trail.set_data(times[: i + 1], speeds[: i + 1])
         speed_dot.set_data([times[i]], [speeds[i]])
 
-        for bar, r in zip(sensor_bars, sensor_ranges[i] if len(sensor_ranges) else []):
+        for bar, r in zip(sensor_bars, sensor_ranges[i] if len(sensor_ranges) else [], strict=True):
             bar.set_height(r)
 
         return (vehicle_patch, true_trail, est_trail, uncertainty_ellipse, speed_trail, speed_dot, *sensor_bars)

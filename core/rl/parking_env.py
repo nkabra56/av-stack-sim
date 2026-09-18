@@ -20,7 +20,7 @@ SENSOR_MAX_RANGE = 8.0
 
 
 class ParkingEnv(gym.Env):
-    metadata = {"render_modes": []}
+    metadata = {"render_modes": []}  # noqa: RUF012 -- standard Gymnasium API convention
 
     def __init__(self, scenario_name: str = "perpendicular_open", dt: float = 0.1, max_steps: int = 500):
         super().__init__()

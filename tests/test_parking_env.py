@@ -6,7 +6,7 @@ import pytest
 
 gymnasium = pytest.importorskip("gymnasium")
 
-from core.rl.parking_env import GOAL_TOL, ParkingEnv  # noqa: E402
+from core.rl.parking_env import ParkingEnv  # noqa: E402
 
 
 def test_gymnasium_check_env_passes():
@@ -19,7 +19,7 @@ def test_gymnasium_check_env_passes():
 
 def test_reset_returns_an_observation_in_bounds():
     env = ParkingEnv()
-    obs, info = env.reset(seed=0)
+    obs, _info = env.reset(seed=0)
     assert env.observation_space.contains(obs)
 
 
@@ -42,7 +42,7 @@ def test_driving_straight_into_a_flanking_obstacle_collides_and_penalizes_heavil
     env._vehicle.x, env._vehicle.y = obstacle.x - obstacle.radius - 1.0, obstacle.y
     env._vehicle.theta = 0.0  # facing directly at the obstacle
 
-    _, reward, terminated, truncated, info = env.step(np.array([1.0, 0.0], dtype=np.float32))
+    _, reward, terminated, _truncated, info = env.step(np.array([1.0, 0.0], dtype=np.float32))
     assert info["collided"]
     assert terminated
     assert reward < -10.0  # the collision penalty dominates this step's reward
@@ -62,7 +62,7 @@ def test_action_is_clipped_to_the_declared_bounds():
 def test_episode_truncates_at_max_steps_if_never_terminated():
     env = ParkingEnv(scenario_name="perpendicular_open", max_steps=5)
     env.reset(seed=0)
-    for i in range(5):
+    for _i in range(5):
         _, _, terminated, truncated, _ = env.step(np.array([0.0, 0.0], dtype=np.float32))  # sit still
     assert truncated
     assert not terminated

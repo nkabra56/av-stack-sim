@@ -1,5 +1,3 @@
-import pytest
-
 from core.control.intersection import IntersectionState
 from core.intersection_harness import (
     no_other_vehicle,

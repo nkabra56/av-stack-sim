@@ -4,9 +4,8 @@ Writes an MCAP file (/scene, /tf, /speed, /sensors, /status channels). See FOXGL
 import math
 from pathlib import Path
 
-import numpy as np
-
 import foxglove
+import numpy as np
 from foxglove import Channel
 from foxglove.channels import FrameTransformChannel, SceneUpdateChannel
 from foxglove.messages import (
@@ -166,7 +165,7 @@ def _vehicle_entity() -> SceneEntity:
 
 def _sensor_rays_entity(x: float, y: float, theta: float, angles: np.ndarray, ranges: np.ndarray, max_range: float) -> SceneEntity:
     lines = []
-    for angle, r in zip(angles, ranges):
+    for angle, r in zip(angles, ranges, strict=True):
         ray_theta = theta + angle
         lines.append(
             LinePrimitive(

@@ -5,8 +5,8 @@ import pytest
 
 pytest.importorskip("stable_baselines3")
 
-from core.rl.parking_env import ParkingEnv  # noqa: E402
-from core.rl.train import train  # noqa: E402
+from core.rl.parking_env import ParkingEnv
+from core.rl.train import train
 
 
 def test_training_runs_end_to_end_without_crashing(tmp_path):

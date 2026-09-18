@@ -37,7 +37,7 @@ def evaluate_rl_policy(model: PPO, scenario_name: str, seeds: list[int], max_ste
     successes, collisions, steps_list = [], [], []
     for seed in seeds:
         obs, _ = env.reset(seed=seed)
-        for step in range(max_steps):
+        for step in range(max_steps):  # noqa: B007 -- used below via step + 1
             action, _ = model.predict(obs, deterministic=True)
             obs, _, terminated, truncated, info = env.step(action)
             if terminated or truncated:

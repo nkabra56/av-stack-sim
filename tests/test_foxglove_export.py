@@ -5,11 +5,11 @@ import pytest
 
 pytest.importorskip("foxglove")
 
-from core.control.pure_pursuit import PurePursuitAdaptive  # noqa: E402
-from core.harness import ParkingHarness  # noqa: E402
-from core.planning.dubins import DubinsPlanner  # noqa: E402
-from core.scenario_loader import load_scenario  # noqa: E402
-from core.visualization.foxglove_export import render_foxglove  # noqa: E402
+from core.control.pure_pursuit import PurePursuitAdaptive
+from core.harness import ParkingHarness
+from core.planning.dubins import DubinsPlanner
+from core.scenario_loader import load_scenario
+from core.visualization.foxglove_export import render_foxglove
 
 
 def test_render_foxglove_writes_nonempty_mcap(tmp_path):

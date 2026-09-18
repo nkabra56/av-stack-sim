@@ -84,7 +84,7 @@ def _solve_csc(
     beta = _mod2pi(goal[2] - chord_theta)
 
     candidates = []
-    for name, (fn, first, last) in _FAMILIES.items():
+    for fn, first, last in _FAMILIES.values():
         result = fn(alpha, beta, d)
         if result is None:
             continue
@@ -106,7 +106,7 @@ def _walk_segments(
 
     pose = start
     segments = []
-    for (kind, mag), n in zip(seg_defs, counts):
+    for (kind, mag), n in zip(seg_defs, counts, strict=True):
         pts = _straight_points(pose, mag, n) if kind == "S" else _arc_points(pose, turning_radius, mag, kind == "L", n)
         segments.append(pts)
         pose = tuple(pts[-1])

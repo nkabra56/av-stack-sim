@@ -1,7 +1,8 @@
 """Minimal synchronous pub/sub bus -- deterministic dispatch, not a real async executor,
 since tests and demos need reproducibility more than realistic ROS2 timing. See DESIGN.md section 2."""
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 Callback = Callable[[Any], None]
 

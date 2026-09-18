@@ -14,7 +14,6 @@ from core.messaging.ros2_bridge import (
     pose_estimate_to_ros_kwargs,
 )
 
-
 # --- Conversion functions ---------------------------------------------------------
 
 

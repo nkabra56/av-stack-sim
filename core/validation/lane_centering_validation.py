@@ -7,8 +7,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from core.control.lane_centering import StanleyController
-from core.vehicle import Vehicle
 from core.validation.ngsim_loader import load_lane_centerline
+from core.vehicle import Vehicle
 
 # Real per-vehicle lateral positioning std within NGSIM lane 2, before aggregation/smoothing
 # (see ATTRIBUTION.md) -- the plausibility bar below.

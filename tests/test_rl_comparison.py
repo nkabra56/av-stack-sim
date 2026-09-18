@@ -7,8 +7,9 @@ import pytest
 
 pytest.importorskip("stable_baselines3")
 
-from core.validation.rl_comparison import evaluate_baseline, evaluate_rl_policy  # noqa: E402
-from stable_baselines3 import PPO  # noqa: E402
+from stable_baselines3 import PPO
+
+from core.validation.rl_comparison import evaluate_baseline, evaluate_rl_policy
 
 MODEL_DIR = Path(__file__).parent.parent / "core" / "data" / "rl"
 MODEL_PATH = MODEL_DIR / "parking_policy_perpendicular_open.zip"
@@ -24,7 +25,7 @@ def test_trained_policy_reliably_parks_without_colliding():
     """The core claim: a policy trained purely from a shaped reward (no hand-coded planning
     or control law) actually reaches the goal reliably and safely -- measured across 5 seeds."""
     model = PPO.load(str(MODEL_PATH))
-    success_rate, collision_rate, mean_steps = evaluate_rl_policy(model, "perpendicular_open", seeds=[1, 2, 3, 4, 5])
+    success_rate, collision_rate, _mean_steps = evaluate_rl_policy(model, "perpendicular_open", seeds=[1, 2, 3, 4, 5])
     assert success_rate >= 0.8
     assert collision_rate == 0.0
 

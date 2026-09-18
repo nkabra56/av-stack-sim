@@ -1,7 +1,8 @@
 """Reference adapter mapping bus.py's in-process pub/sub onto real ROS2 topics (DESIGN.md
 section 10). Not verified against a real ROS2 install -- see tests/test_ros2_bridge.py."""
 
-from typing import Any, Callable, Protocol
+from collections.abc import Callable
+from typing import Any, Protocol
 
 import numpy as np
 

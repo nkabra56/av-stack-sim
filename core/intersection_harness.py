@@ -1,8 +1,8 @@
 """Runs an IntersectionNavigator against a scripted other-vehicle scenario. Simpler than
 harness.py's pub/sub structure on purpose -- H4 tests right-of-way, not sensor fusion."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 import numpy as np
 

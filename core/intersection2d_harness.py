@@ -7,8 +7,8 @@ import numpy as np
 
 from core.control.intersection import IntersectionNavigator, IntersectionState, OtherVehicleStatus
 from core.control.intersection_geometry import (
-    TURN_LEAD_RATIO,
     HIGHWAY_VEHICLE_RADIUS,
+    TURN_LEAD_RATIO,
     Approach,
     Turn,
     build_turn_path,

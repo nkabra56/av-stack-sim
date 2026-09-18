@@ -111,7 +111,7 @@ def test_controller_node_actually_asks_for_a_replan_when_the_initial_plan_failed
     bus = Bus()
     environment = Environment(Spot(0.0, 0.0, 0.0), obstacles=[])
     planner = FailsOnceThenSucceeds()
-    planner_node = PlannerNode(bus, planner, environment, TURNING_RADIUS, max_replans=3)
+    PlannerNode(bus, planner, environment, TURNING_RADIUS, max_replans=3)
     controller_node = ControllerNode(bus, MPCController(wheelbase=2.7, delta_max=0.6, v_max=1.5), a_max=0.8)
 
     bus.publish("pose_estimate", _pose(-10.0, 0.0, 0.0))

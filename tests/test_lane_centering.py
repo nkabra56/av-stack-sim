@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from core.control.lane_centering import StanleyController
 from core.vehicle import Vehicle

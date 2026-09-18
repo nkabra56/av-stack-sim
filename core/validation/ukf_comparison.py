@@ -106,7 +106,9 @@ def validate_against_kitti(
     position_fix_period: int = 10,
 ) -> ComparisonResult:
     dt = sequence.times[1] - sequence.times[0] if len(sequence.x) > 1 else 0.1
-    delta_true = np.array([_delta_from_yaw_rate(v, yr, wheelbase) for v, yr in zip(sequence.v, sequence.yaw_rate)])
+    delta_true = np.array(
+        [_delta_from_yaw_rate(v, yr, wheelbase) for v, yr in zip(sequence.v, sequence.yaw_rate, strict=True)]
+    )
     return _run_both(
         sequence.x, sequence.y, sequence.theta, sequence.v, delta_true, dt, wheelbase, seed,
         odom_v_std, odom_delta_std, compass_std, position_std, position_fix_period,

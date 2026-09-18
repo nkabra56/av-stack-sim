@@ -6,6 +6,10 @@ __pycache__/
 *.png
 *.mcap
 
+# ...except committed README/docs media (ad-hoc --save/--plot output elsewhere stays ignored)
+!docs/media/*.gif
+!docs/media/*.png
+
 # graphify-generated knowledge graph (regenerate with `graphify update .`)
 graphify-out/
 

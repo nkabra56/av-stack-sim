@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> None:
         scenario = load_scenario(args.scenario)
     except FileNotFoundError as exc:
         print(exc, file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
     planner = PLANNERS[args.planner]()
     controller = CONTROLLERS[args.controller](scenario.vehicle)

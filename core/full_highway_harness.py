@@ -13,7 +13,12 @@ from core.control.lane_geometry import build_arc_length_table, pose_at_arc_lengt
 from core.estimation.ekf import ExtendedKalmanFilter
 from core.intersection_harness import no_other_vehicle
 from core.messaging.bus import Bus
-from core.messaging.messages import EgoHighwayStateMsg, EgoLongitudinalStateMsg, EgoSpeedEstimateMsg, LeadVehicleStateMsg
+from core.messaging.messages import (
+    EgoHighwayStateMsg,
+    EgoLongitudinalStateMsg,
+    EgoSpeedEstimateMsg,
+    LeadVehicleStateMsg,
+)
 from core.nodes.acc_controller_node import AccController, AccControllerNode
 from core.nodes.highway_vehicle_node import HighwayVehicleNode
 from core.nodes.intersection_controller_node import IntersectionControllerNode

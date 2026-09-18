@@ -12,7 +12,7 @@ from core.vehicle import wrap_angle
 
 def _proceed_time(result, name: str) -> float | None:
     vehicle = next(v for v in result.vehicles if v.name == name)
-    for t, s in zip(result.times, vehicle.states):
+    for t, s in zip(result.times, vehicle.states, strict=True):
         if s.name == "PROCEEDING":
             return t
     return None
@@ -120,7 +120,7 @@ def test_turn_geometry_meets_curvature_limit_and_is_short_for_every_approach_and
     turning_radius = 6.0
     for approach in [NORTH, EAST, SOUTH, WEST]:
         for turn in ["left", "right"]:
-            exit_approach, path = build_turn_path(approach, turn, lane_offset=3.0, turning_radius=turning_radius)
+            _exit_approach, path = build_turn_path(approach, turn, lane_offset=3.0, turning_radius=turning_radius)
             seg_lens = np.hypot(np.diff(path[:, 0]), np.diff(path[:, 1]))
             total = float(seg_lens.sum())
             straight_dist = float(np.hypot(path[-1, 0] - path[0, 0], path[-1, 1] - path[0, 1]))
