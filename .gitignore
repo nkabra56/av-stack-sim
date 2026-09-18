@@ -13,3 +13,6 @@ __pycache__/
 # graphify-generated knowledge graph (regenerate with `graphify update .`)
 graphify-out/
 
+
+# local Claude Code config and skills
+.claude/
