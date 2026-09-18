@@ -136,7 +136,7 @@ class ParkingHarness:
         return False
 
     def run(self, max_steps: int = 500, on_tick: Callable[[int], None] | None = None) -> SimulationResult:
-        """`on_tick(tick)`, if given, runs before each tick -- used by re-planning tests to
+        """`on_tick(tick)`, if given, runs before each tick: used by re-planning tests to
         mutate `self.environment.obstacles` mid-run (KNOWN_BUGS.md entry 3)."""
         true_history: list[tuple[float, float, float]] = []
         est_history: list[tuple[float, float, float]] = []

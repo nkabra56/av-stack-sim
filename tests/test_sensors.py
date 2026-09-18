@@ -1,4 +1,4 @@
-"""Hand-computed ray/circle intersection cases for UltrasonicArray.sense -- direct unit
+"""Hand-computed ray/circle intersection cases for UltrasonicArray.sense: direct unit
 coverage on top of test_simulation.py's integration-level coverage."""
 
 import numpy as np
@@ -10,7 +10,7 @@ from core.vehicle import Vehicle
 
 
 def test_obstacle_dead_ahead_returns_the_near_edge_distance():
-    """Vehicle at the origin facing +x, obstacle centered at (5, 0) r=1 -- the ray hits
+    """Vehicle at the origin facing +x, obstacle centered at (5, 0) r=1: the ray hits
     the circle's near edge at x=4, so the reading is 4.0, not the 5.0 center distance."""
     sensor = UltrasonicArray(angles=[0.0], max_range=10.0)
     vehicle = Vehicle(x=0.0, y=0.0, theta=0.0)
@@ -28,7 +28,7 @@ def test_obstacle_out_of_range_reads_max_range():
 
 
 def test_obstacle_behind_the_beam_direction_is_ignored():
-    """Obstacle at (-5, 0), beam pointing along +x -- both intersection params are
+    """Obstacle at (-5, 0), beam pointing along +x: both intersection params are
     negative (behind the ray's origin), excluded by the `0 <= t` check."""
     sensor = UltrasonicArray(angles=[0.0], max_range=10.0)
     vehicle = Vehicle(x=0.0, y=0.0, theta=0.0)
@@ -37,7 +37,7 @@ def test_obstacle_behind_the_beam_direction_is_ignored():
 
 
 def test_obstacle_off_to_the_side_of_a_straight_beam_is_a_true_miss():
-    """Obstacle centered well off the ray's line entirely (discriminant < 0) -- a
+    """Obstacle centered well off the ray's line entirely (discriminant < 0): a
     genuine geometric miss, not just an out-of-range or behind-the-beam case."""
     sensor = UltrasonicArray(angles=[0.0], max_range=10.0)
     vehicle = Vehicle(x=0.0, y=0.0, theta=0.0)
@@ -46,7 +46,7 @@ def test_obstacle_off_to_the_side_of_a_straight_beam_is_a_true_miss():
 
 
 def test_tangent_obstacle_touches_at_exactly_one_point():
-    """Obstacle at (5, 1) r=1, beam along +x -- exactly tangent (discriminant == 0),
+    """Obstacle at (5, 1) r=1, beam along +x, exactly tangent (discriminant == 0),
     touching at x=5. Both quadratic roots coincide; reading is the tangent-point distance."""
     sensor = UltrasonicArray(angles=[0.0], max_range=10.0)
     vehicle = Vehicle(x=0.0, y=0.0, theta=0.0)
@@ -55,7 +55,7 @@ def test_tangent_obstacle_touches_at_exactly_one_point():
 
 
 def test_nearest_of_several_obstacles_wins():
-    """Two obstacles on the same beam -- the reading is the nearer one's distance, not
+    """Two obstacles on the same beam: the reading is the nearer one's distance, not
     the farther one's or some combination."""
     sensor = UltrasonicArray(angles=[0.0], max_range=10.0)
     vehicle = Vehicle(x=0.0, y=0.0, theta=0.0)
@@ -67,7 +67,7 @@ def test_nearest_of_several_obstacles_wins():
 
 def test_beam_angle_is_relative_to_vehicle_heading():
     """A beam_angle of +pi/2, with the vehicle already facing +pi/2 (north), points the
-    ray along -x (west) -- beam angles compose with theta, they aren't absolute."""
+    ray along -x (west): beam angles compose with theta, they aren't absolute."""
     sensor = UltrasonicArray(angles=[np.pi / 2], max_range=10.0)
     vehicle = Vehicle(x=0.0, y=0.0, theta=np.pi / 2)
     readings = sensor.sense(vehicle, [Obstacle(x=-5.0, y=0.0, radius=1.0)])

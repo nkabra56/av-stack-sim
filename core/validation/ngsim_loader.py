@@ -9,7 +9,7 @@ import numpy as np
 
 FEET_TO_METERS = 0.3048
 DEFAULT_EXCERPT_PATH = Path(__file__).parent.parent / "data" / "ngsim" / "excerpt_trajectories.csv"
-# vehicle_id 2896 (leader) / 2903 (follower), NGSIM US-101 lane 2 -- re-extracted to be
+# vehicle_id 2896 (leader) / 2903 (follower), NGSIM US-101 lane 2: re-extracted to be
 # lane-coherent with lane_centerline.csv (KNOWN_BUGS.md entry 6). See ATTRIBUTION.md.
 DEFAULT_LEADER_ID = 2896
 DEFAULT_FOLLOWER_ID = 2903
@@ -29,7 +29,7 @@ class NgsimTrajectory:
 class NgsimFollowingPair:
     leader: NgsimTrajectory
     follower: NgsimTrajectory
-    real_space_headway: np.ndarray  # (N,) meters -- TRUE bumper-to-bumper gap (see load_following_pair)
+    real_space_headway: np.ndarray  # (N,) meters, TRUE bumper-to-bumper gap (see load_following_pair)
     real_time_headway: np.ndarray  # (N,) seconds
 
 
@@ -65,7 +65,7 @@ def load_following_pair(
         (r for r in rows if int(r["vehicle_id"]) == follower_id), key=lambda r: int(r["global_time"])
     )
     # NGSIM's own space_headway is front-center-to-front-center, not the bumper-to-bumper
-    # "gap" acc.py/AccHarness mean -- subtract the leader's length to convert, once, here.
+    # "gap" acc.py/AccHarness mean: subtract the leader's length to convert, once, here.
     real_space_headway = (
         np.array([float(r["space_headway"]) * FEET_TO_METERS for r in follower_rows]) - leader.length
     )

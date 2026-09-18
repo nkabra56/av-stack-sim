@@ -36,7 +36,7 @@ def test_replan_request_produces_a_new_obstacle_avoiding_path():
     bus.publish("pose_estimate", _pose(-10.0, 0.0, 0.0))
     assert len(published) == 1
     original_path = published[0]
-    # The original, obstacle-free plan is a straight line -- confirms it actually runs
+    # The original, obstacle-free plan is a straight line: confirms it actually runs
     # through where the obstacle below will be dropped, not around it.
     assert np.allclose(original_path[:, 1], 0.0, atol=1e-6)
 
@@ -72,7 +72,7 @@ def test_replan_requests_are_capped_at_max_replans():
 
 def test_a_planner_that_cannot_find_a_route_leaves_the_old_path_in_place():
     """Every shipped Planner fails loud with a RuntimeError subclass rather than returning
-    a partial path -- PlannerNode must not crash or publish a nonexistent path on that."""
+    a partial path: PlannerNode must not crash or publish a nonexistent path on that."""
 
     class AlwaysFailsPlanner:
         def plan(self, start, goal, obstacles, turning_radius):
@@ -85,16 +85,16 @@ def test_a_planner_that_cannot_find_a_route_leaves_the_old_path_in_place():
     published = []
     bus.subscribe("path", lambda msg: published.append(msg.path))
     bus.publish("pose_estimate", _pose(-10.0, 0.0, 0.0))
-    assert published == []  # initial plan also failed -- nothing published, no crash
+    assert published == []  # initial plan also failed, nothing published, no crash
 
     bus.publish("replan_request", ReplanRequestMsg())
     assert node._replans == 1
-    assert published == []  # still nothing -- the failure was swallowed, not crashed on
+    assert published == []  # still nothing: the failure was swallowed, not crashed on
 
 
 def test_controller_node_actually_asks_for_a_replan_when_the_initial_plan_failed():
     """Found in code review: PlannerNode marks `_planned = True` even if planning failed,
-    and ControllerNode used to early-return before reaching the stall counter -- disconnected (KNOWN_BUGS.md entry 3)."""
+    and ControllerNode used to early-return before reaching the stall counter: disconnected (KNOWN_BUGS.md entry 3)."""
     from core.control.mpc import MPCController
     from core.nodes.controller_node import STALL_TICKS, ControllerNode
 
@@ -121,7 +121,7 @@ def test_controller_node_actually_asks_for_a_replan_when_the_initial_plan_failed
     for _ in range(STALL_TICKS):
         controller_node.step()  # exactly what ParkingHarness.run() calls once per tick
 
-    assert planner.calls == 2  # ControllerNode's stall counter asked for -- and got -- a retry
+    assert planner.calls == 2  # ControllerNode's stall counter asked for, and got, a retry
     assert controller_node._path is not None  # the retry succeeded; recovery is complete
 
 
@@ -129,7 +129,7 @@ def test_controller_node_actually_asks_for_a_replan_when_the_initial_plan_failed
 
 
 class _AlwaysWantsToMove:
-    """Stub Controller: always wants to drive forward, regardless of the path -- isolates
+    """Stub Controller: always wants to drive forward, regardless of the path, isolates
     ControllerNode's stall-detection from any real path-tracking law."""
 
     def control(self, pose: HasPose, path: np.ndarray) -> tuple[float, float]:
@@ -223,7 +223,7 @@ def _run(max_replans: int, max_steps: int = 500, seed: int = 1):
 
 
 def test_never_collides_with_a_dynamically_appearing_obstacle():
-    """Safety holds regardless of when the obstacle showed up -- ControllerNode's speed
+    """Safety holds regardless of when the obstacle showed up: ControllerNode's speed
     governor guarantees this alone; the tests below check whether it can also make progress."""
     for max_replans in (0, 3):
         result, _ = _run(max_replans)
@@ -244,13 +244,13 @@ def test_replanning_produces_a_materially_different_obstacle_avoiding_path():
     clearance = np.hypot(
         with_replanning.path[:, 0] - DYNAMIC_OBSTACLE.x, with_replanning.path[:, 1] - DYNAMIC_OBSTACLE.y
     ).min()
-    assert clearance >= DYNAMIC_OBSTACLE.radius + 1.0  # VEHICLE_RADIUS -- a genuinely valid detour
+    assert clearance >= DYNAMIC_OBSTACLE.radius + 1.0  # VEHICLE_RADIUS: a genuinely valid detour
     assert not with_replanning.collision
     assert with_replanning.success  # KNOWN_BUGS.md entry 3: now actually reaches the goal
 
 
 def test_replanning_recovery_holds_across_seeds():
-    """entry 3's fix (tracking-aware buffer) was tuned against a real parameter sweep --
+    """entry 3's fix (tracking-aware buffer) was tuned against a real parameter sweep:
     pin it across multiple seeds so a future change to those constants has real coverage."""
     for seed in [1, 2, 3, 4, 5]:
         result, _ = _run(max_replans=3, seed=seed)
@@ -259,7 +259,7 @@ def test_replanning_recovery_holds_across_seeds():
 
 
 def test_replanning_gives_up_after_max_replans_instead_of_looping_forever():
-    """A capped-at-zero re-plan budget must still terminate -- fail-safe (stopped, no
+    """A capped-at-zero re-plan budget must still terminate: fail-safe (stopped, no
     collision), not an infinite retry loop."""
     result, _ = _run(max_replans=0, max_steps=300)
     assert not result.collision

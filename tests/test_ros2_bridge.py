@@ -29,7 +29,7 @@ def test_pose_estimate_conversion_maps_position_and_yaw_only_quaternion():
 
 def test_pose_estimate_conversion_embeds_covariance_at_the_right_flattened_indices():
     """The 3x3 covariance must land at ROS2's (x, y, yaw) sub-indices (0, 1, 5) of the
-    flattened 6x6 layout -- a wrong index would silently corrupt every downstream consumer."""
+    flattened 6x6 layout: a wrong index would silently corrupt every downstream consumer."""
     cov = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
     msg = PoseEstimateMsg(x=0.0, y=0.0, theta=0.0, covariance=cov)
     flat = pose_estimate_to_ros_kwargs(msg)["covariance"]
@@ -92,7 +92,7 @@ class _FakeRosNode:
 
 
 class _FakeRosMsg:
-    """Stand-in for a real ROS2 message class -- records whatever kwargs it was
+    """Stand-in for a real ROS2 message class: records whatever kwargs it was
     constructed with, so a test can check the bridge passed the converted fields
     through unchanged."""
 
@@ -137,7 +137,7 @@ def test_multiple_bus_messages_each_produce_one_ros_publish():
 
 
 def test_bridge_does_not_interfere_with_other_bus_subscribers():
-    """The bridge subscribes like any other node -- it shouldn't prevent or reorder
+    """The bridge subscribes like any other node; it shouldn't prevent or reorder
     delivery to subscribers that were already listening on the same topic."""
     bus = Bus()
     received = []

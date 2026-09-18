@@ -6,7 +6,7 @@ from core.vehicle import Vehicle
 
 def test_converges_from_a_lateral_offset_on_a_straight_lane():
     """Regression guard for a real sign-convention bug: the cross-track error's sign
-    has to steer *toward* the path -- getting it backwards silently diverges, no error."""
+    has to steer *toward* the path, getting it backwards silently diverges, no error."""
     path = np.column_stack([np.linspace(0, 200, 201), np.zeros(201), np.zeros(201)])
     vehicle = Vehicle(x=0.0, y=2.0, theta=0.0, wheelbase=2.7)
     controller = StanleyController(wheelbase=2.7, k=0.5)
@@ -19,7 +19,7 @@ def test_converges_from_a_lateral_offset_on_a_straight_lane():
 
 
 def test_converges_from_the_opposite_lateral_offset_too():
-    """Same check, offset to the other side -- catches a sign bug that only
+    """Same check, offset to the other side: catches a sign bug that only
     happens to look correct from one direction."""
     path = np.column_stack([np.linspace(0, 200, 201), np.zeros(201), np.zeros(201)])
     vehicle = Vehicle(x=0.0, y=-2.0, theta=0.0, wheelbase=2.7)

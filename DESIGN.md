@@ -3,10 +3,10 @@
 ## 1. Problem statement & goals
 
 This project covers two driving regimes on one shared architecture: **parking-lot maneuvers**
-(Sections 2-10 below — planning, control, and estimation for perpendicular/parallel parking at
+(Sections 2-10 below, planning, control, and estimation for perpendicular/parallel parking at
 <2 m/s) and, starting with adaptive cruise control (Section 11), a growing **highway driving**
 mode (longitudinal control now; lane centering, richer sensor fusion, and intersection
-navigation are next — Section 12). Both share the same pub/sub node architecture, the same
+navigation are next: Section 12). Both share the same pub/sub node architecture, the same
 `ExtendedKalmanFilter`, and the same "classical/reactive vs. optimization-based" controller
 comparison device, applied to whatever the driving task actually is.
 
@@ -21,11 +21,11 @@ simulation:
 - **Visualize** the result as an animated top-down view, suitable for a GIF.
 
 Explicitly out of scope, project-wide: mapping/SLAM (obstacle/landmark positions are known/mapped
-in advance — the vehicle localizes against them, it doesn't build the map), 3D/terrain, and
-perception-level sensor fusion (detecting/tracking *other* agents from raw camera/lidar data —
+in advance, the vehicle localizes against them, it doesn't build the map), 3D/terrain, and
+perception-level sensor fusion (detecting/tracking *other* agents from raw camera/lidar data:
 the highway mode's "sensor fusion" milestone, Section 12, extends the *ego* pose estimator, the
 same kind of fusion already built for parking, not object detection). This is a
-planning+control+estimation simulation, not a full production AV stack — that scope boundary is
+planning+control+estimation simulation, not a full production AV stack; that scope boundary is
 deliberate so the project stays focused on demonstrating the algorithms rather than becoming a
 shallow attempt at everything a real AV company's stack does.
 
@@ -50,14 +50,14 @@ flowchart LR
 
 Two properties of this graph matter more than the fact that it's "pub/sub" at all:
 
-- **`true_state` is subscribed only by `SensorNode` and the harness's own evaluation logic** —
+- **`true_state` is subscribed only by `SensorNode` and the harness's own evaluation logic**:
   never by the estimator, planner, or controller. That's the perception/reality boundary made
   structural rather than a comment: a real vehicle doesn't get to peek at its own ground-truth
   pose either, and nothing in this codebase can accidentally do so without adding a new
   subscription to a topic named `true_state`, which is easy to grep for and easy to review against.
 - **Nodes only ever reference topic names and message types, never each other directly.** Adding
   a new planner or controller means writing a class that satisfies `Planner`/`Controller`
-  (`interfaces.py`) and wrapping it in the corresponding node — nothing else in the graph changes.
+  (`interfaces.py`) and wrapping it in the corresponding node, nothing else in the graph changes.
 
 Dispatch (`core/messaging/bus.py`) is **synchronous and immediate**: `publish()` calls every
 subscriber callback directly, in registration order, no threads or async queue. A real ROS2 graph
@@ -69,10 +69,10 @@ faithfully modeling DDS scheduling. That's a deliberate tradeoff, not a missing 
 
 1. `VehicleNode` applies the previous tick's `control_cmd` to the real `Vehicle`, publishes
    `true_state` and noisy `odometry`. Publishing `odometry` synchronously triggers an EKF predict
-   inside `EstimatorNode`, which republishes `pose_estimate` — which, on the very first tick,
+   inside `EstimatorNode`, which republishes `pose_estimate`, which, on the very first tick,
    also triggers `PlannerNode` to plan once (see Section 6).
 2. `SensorNode` (having received `true_state`) publishes `obstacle_ranges`, an always-on noisy
-   `compass` reading, and — when due — a `position_fix` and/or `landmark_bearings`. Each of these
+   `compass` reading, and, when due: a `position_fix` and/or `landmark_bearings`. Each of these
    synchronously triggers a further EKF correction and `pose_estimate` republish.
 3. `ControllerNode.step()` is called explicitly by the harness (not reactively) exactly once,
    using the freshest `pose_estimate`/`path`/`obstacle_ranges` available, and publishes exactly
@@ -80,12 +80,12 @@ faithfully modeling DDS scheduling. That's a deliberate tradeoff, not a missing 
    even though `pose_estimate` is republished several times a tick.
 
 The harness itself subscribes to `true_state`, `pose_estimate`, and `path` purely to record
-history for evaluation and visualization — it participates in the graph the same way any other
+history for evaluation and visualization; it participates in the graph the same way any other
 node would, it just happens to also be allowed to see ground truth.
 
 ## 3. Vehicle model
 
-Kinematic bicycle model — the standard simplification for low-speed maneuvers (parking) where
+Kinematic bicycle model: the standard simplification for low-speed maneuvers (parking) where
 tire slip is negligible:
 
 ```
@@ -94,14 +94,14 @@ y'     = v * sin(theta)
 theta' = (v / L) * tan(delta)
 ```
 
-where `L` is the wheelbase, `v` is speed (signed — negative means reverse), and `delta` is the
+where `L` is the wheelbase, `v` is speed (signed: negative means reverse), and `delta` is the
 steering angle. All angles are in **radians** throughout the codebase (the original prototype's
-bug — passing `theta=90.0` meaning degrees into a radians-only model — was exactly the kind of
+bug (passing `theta=90.0` meaning degrees into a radians-only model) was exactly the kind of
 unit mismatch this model is sensitive to, since `theta'` compounds every step).
 
-`Vehicle` also carries `max_steer` (default 0.6 rad, ~34 degrees — a realistic passenger-car
+`Vehicle` also carries `max_steer` (default 0.6 rad, ~34 degrees: a realistic passenger-car
 limit) and exposes `turning_radius = wheelbase / tan(max_steer)`. This is the single source of
-truth the planner and both controllers size themselves against — see Section 6 for why treating
+truth the planner and both controllers size themselves against: see Section 6 for why treating
 it as a real physical constraint, rather than an afterthought, turned out to matter a lot more
 than expected.
 
@@ -112,7 +112,7 @@ since "why not the more complex model" is the kind of question this doc should p
 
 Acceleration limiting (bounding how fast commanded speed can actually change, `a_max`) and
 steering clamping to `max_steer` both live in `VehicleNode`, not in any controller. They're
-physical actuator limits of the plant, not part of a control law — a controller is free to
+physical actuator limits of the plant, not part of a control law: a controller is free to
 command an unreachable `v_desired` or an over-limit `delta`; `VehicleNode` is what enforces what
 the vehicle can actually do about it. Keeping that enforcement in exactly one place, rather than
 duplicated in every controller, is what makes it trustworthy: no controller can silently bypass it.
@@ -142,18 +142,18 @@ what it corrects.
 from an Extended Kalman Filter (`core/estimation/ekf.py`) that fuses noisy odometry and
 three noisy sensor types into a `[x, y, theta]` pose estimate with covariance. This is the classic
 "odometry + periodic absolute correction" mobile-robot localization pattern (Thrun, Burgard & Fox,
-*Probabilistic Robotics*, ch. 7) — localization, not SLAM: obstacle/landmark positions are assumed
+*Probabilistic Robotics*, ch. 7): localization, not SLAM: obstacle/landmark positions are assumed
 known in advance (they come straight from `Environment`), the filter only estimates the vehicle's
 own pose against them.
 
-**Predict** (every tick, driven by noisy odometry — not the commanded control, which is what
+**Predict** (every tick, driven by noisy odometry, not the commanded control, which is what
 makes this dead reckoning): propagate the mean through the same nonlinear bicycle-model equations
 as `Vehicle.update`, linearized via its state Jacobian `F`. Process noise uses the
 **control-dependent "velocity motion model"** formulation (same reference, ch. 5) rather than a
 fixed, arbitrarily-sized `Q`: `Q = V @ M @ Vᵀ`, where `M` is the odometry noise covariance and
 `V = df/d(v, delta)` is the motion model's Jacobian with respect to its *inputs*. This ties how
 fast uncertainty grows during prediction directly to how noisy the odometry actually is, instead
-of guessing a growth rate independently of the sensor supposedly driving it — the difference
+of guessing a growth rate independently of the sensor supposedly driving it: the difference
 matters: an arbitrary fixed `Q` would grow (or shrink) the covariance ellipse drawn in the demo
 animation (`visualization/animate.py`) without any real connection to the odometry noise
 parameters it's sitting next to in the config.
@@ -163,62 +163,62 @@ parameters it's sitting next to in the config.
 - **Compass** (`H = [0, 0, 1]`, every tick): keeps heading from drifting unboundedly even with
   zero landmarks in view. Without this, the two obstacle-free scenarios (nothing to take a
   landmark bearing on) would have no heading correction at all and would likely fail once noise
-  entered the loop — this was in fact observed while building it (see Section 7).
+  entered the loop; this was in fact observed while building it (see Section 7).
 - **Position fix** (`H = [[1,0,0],[0,1,0]]`, every ~10 ticks, moderate noise): models a
   garage-style RTLS/UWB-anchor fix, a real deployed technique for indoor/garage vehicle
-  localization — not an implausible "GPS in a parking garage." Rank-deficient by design (doesn't
-  observe heading) — a genuine partial-observability setup, not a toy one.
+  localization, not an implausible "GPS in a parking garage." Rank-deficient by design (doesn't
+  observe heading): a genuine partial-observability setup, not a toy one.
 - **Landmark range-bearing** (nonlinear `h(x, landmark)`, standard range-bearing Jacobian,
-  opportunistic — only when an obstacle is within sensor range): what makes this a genuine
-  sensor-fusion EKF rather than a linear Kalman filter wearing an EKF's name — both the
+  opportunistic, only when an obstacle is within sensor range): what makes this a genuine
+  sensor-fusion EKF rather than a linear Kalman filter wearing an EKF's name, both the
   *prediction* and (for this measurement type) the *correction* step are nonlinear.
 
-**Collision and success are always evaluated against true state**, in the harness — never against
+**Collision and success are always evaluated against true state**, in the harness: never against
 the estimate. The estimate is what the vehicle acts on; "did it actually hit something" has to be
 ground truth, or the test suite would be validating the filter's honesty about its own errors
 instead of actual safety.
 
 Initial pose is assumed roughly known (`x0` = true start pose, with a modest initial covariance,
-not zero) — a common simplifying assumption that distinguishes ordinary localization/tracking
+not zero): a common simplifying assumption that distinguishes ordinary localization/tracking
 from the harder "kidnapped robot" global relocalization problem, which is out of scope here.
 
 ### Validation against real data
 
-`tests/test_ekf.py` only ever validates the filter against noise the project itself generates —
+`tests/test_ekf.py` only ever validates the filter against noise the project itself generates;
 that proves the *implementation* is self-consistent, but not that it behaves sensibly on a real,
 messy trajectory nobody hand-picked to be filter-friendly. `core/validation/` closes that
 gap: it replays a real driven trajectory from the **KITTI Odometry benchmark**'s ground-truth
-poses (`core/data/kitti/excerpt_poses.txt` — 300 frames of sequence 09, chosen specifically
+poses (`core/data/kitti/excerpt_poses.txt`, 300 frames of sequence 09, chosen specifically
 for having real turns, not a straight highway stretch, so heading estimation is actually
 exercised) through the *same, unmodified* `ExtendedKalmanFilter`, using the *same* noise defaults
 as `SensorNode`/`VehicleNode`.
 
 KITTI records no steering angle, only speed and yaw rate, so each step's true `(v, yaw_rate)` is
 converted to the `(v, delta)` the bicycle-model `predict()` expects via
-`delta = atan2(wheelbase * yaw_rate, v)` — a pure adapter, not a second process model; the EKF
+`delta = atan2(wheelbase * yaw_rate, v)`: a pure adapter, not a second process model; the EKF
 class itself needed zero changes. Frame-to-frame timing isn't included in the poses-only
-download, so frames are assumed uniformly spaced at the Velodyne's nominal 10 Hz — an
+download, so frames are assumed uniformly spaced at the Velodyne's nominal 10 Hz: an
 approximation, stated as one rather than silently assumed. Ground-plane position and heading are
 extracted from KITTI's row-major `[R|t]` camera-frame pose matrices using camera **x**/**z** as
-the ground plane and rotation about camera **y** as heading — verified empirically (not just
+the ground plane and rotation about camera **y** as heading: verified empirically (not just
 derived on paper) by checking that the extracted heading tracks the actual direction of travel
 between consecutive frames on a real turning sequence (mean deviation ~0.12 rad, consistent with
 real vehicle slip and finite-difference noise, not a convention bug).
 
-The validation runs two passes over the *identical* noisy odometry stream — the EKF (predict +
-corrections) and dead-reckoning-only (predict only, no corrections) — so the comparison isolates
+The validation runs two passes over the *identical* noisy odometry stream: the EKF (predict +
+corrections) and dead-reckoning-only (predict only, no corrections), so the comparison isolates
 exactly what the corrections buy you. On the committed excerpt: **0.85 m RMSE with corrections
-vs. 4.97 m without — an 83% error reduction**, on a real trajectory the filter was never tuned
+vs. 4.97 m without, an 83% error reduction**, on a real trajectory the filter was never tuned
 against. `tests/test_kitti_ekf_validation.py` asserts the EKF strictly beats dead-reckoning-only
-(the robust claim — no arbitrary accuracy threshold to pick) rather than asserting a specific
+(the robust claim: no arbitrary accuracy threshold to pick) rather than asserting a specific
 RMSE number, since the exact figure is a property of this one excerpt, not a guarantee.
 
 ## 6. Path planning
 
 ### M1 baseline: Dubins paths
 
-The M1 baseline plans a single fixed **Dubins path** — the shortest path between two poses for a
-forward-only car with a minimum turning radius — from the start pose straight to the spot. It
+The M1 baseline plans a single fixed **Dubins path** (the shortest path between two poses for a
+forward-only car with a minimum turning radius) from the start pose straight to the spot. It
 does not see obstacles at all; obstacle handling is purely reactive at the control layer (the
 simulation loop brakes when the sensor array detects something close, see Section 2). That means
 the vehicle can drive itself into a dead end: if an obstacle sits on the path, the car brakes and
@@ -230,53 +230,53 @@ An earlier version of this planner used a generic smooth (cubic Bezier) curve sh
 start/goal positions and headings, with no reference to the vehicle's actual turning radius. It
 looked reasonable and passed a casual glance, but for a heading change near 90 degrees (typical
 perpendicular-parking geometry) compressed into a short chord, it produced curvature several
-times tighter than the vehicle's `max_steer` allows — a smooth-looking path that was
+times tighter than the vehicle's `max_steer` allows: a smooth-looking path that was
 kinematically impossible to drive. Both controllers failed to track it, for the correct reason:
 there was nothing to successfully track. Dubins paths are built from exactly two arcs of the
 vehicle's real turning radius plus a straight segment, so curvature is always either 0 or exactly
-`1 / turning_radius`, never more — every generated path is drivable by construction, not by luck.
+`1 / turning_radius`, never more: every generated path is drivable by construction, not by luck.
 This is the kind of bug that's easy to miss by eyeballing a plotted curve and only shows up once
 you check curvature against the vehicle's actual limits, which is why Section 8 calls this out
 as a design decision rather than leaving it implicit. `DubinsPlanner` stays in the repo,
 unmodified in behavior, both as a documented "M1 baseline" reference (`demo.py --planner dubins`)
 and because `reeds_shepp.py` reuses its CSC formulas directly (Section below).
 
-### M2 — Hybrid A* + Reeds-Shepp: done
+### M2: Hybrid A* + Reeds-Shepp (done)
 
 Two planners, used together, are the fix for the obstacle-avoidance gap above, and are now the
 default (`HybridAStarPlanner`, selectable via `demo.py --planner`, alongside `reeds_shepp`/`dubins`
 for comparison):
 
 - **Reeds-Shepp curves** (`planning/reeds_shepp.py`): the closed-form generalization of Dubins
-  paths that also allows reverse gear. **Scoped to the CSC family only** — the same 4
+  paths that also allows reverse gear. **Scoped to the CSC family only**: the same 4
   circle-straight-circle families `dubins.py` already implements (LSL, RSR, LSR, RSL), each tried
-  in both a forward and a backward-gear direction (8 candidates total) — deliberately not
+  in both a forward and a backward-gear direction (8 candidates total), deliberately not
   implementing the CCC ("3-point-turn") family, the same kind of scoping decision `dubins.py`
   already makes for its own CCC exclusion (only matters when start/goal turning circles are closer
   than ~4x turning_radius; checked against all 5 scenarios' actual geometry, none needs it, and
   Hybrid A*'s primitive-by-primitive search can compose the same shape out of ordinary
-  forward+reverse steps even where the closed-form shortcut isn't available — a missing CCC family
+  forward+reverse steps even where the closed-form shortcut isn't available: a missing CCC family
   degrades search quality in a rare pocket, it never makes a scenario unsolvable).
 
   The reverse-gear half reuses `dubins.py`'s forward-only CSC solver unchanged, via a simplification
   found while implementing it: **a backward-gear CSC path from A to B is exactly the point array of
   the ordinary forward CSC solve from B to A, with row order reversed and headings left
-  untouched** — no reflect/timeflip trigonometry needed. Verified by hand (two independent
+  untouched**, no reflect/timeflip trigonometry needed. Verified by hand (two independent
   derivations of a reverse-gear arc landed on identical points) before trusting it, the same
   "verify before you build on it" discipline as the KITTI axis-convention check (Section 5) and the
   Stanley sign-convention bug (Section 12's H3 entry).
 - **Hybrid A\*** (`planning/hybrid_astar.py`): search over a discretized `(x, y, theta)` state
   space (0.5m / 5° resolution), where each expansion step is one of 6 motion primitives (3
-  steering choices × forward/reverse, each exactly 0 or `1/turning_radius` curvature — the same
+  steering choices × forward/reverse, each exactly 0 or `1/turning_radius` curvature, the same
   two values Dubins already restricts to), costed per Dolgov et al. 2010's practical formulation
   (reverse/cusp/steering-change penalties bias the search toward smooth, mostly-forward paths while
   still permitting reverse where it's the only way through). The heuristic is the (obstacle-unaware)
-  Reeds-Shepp path length to the goal, also used for **analytic expansion** — attempting a direct,
+  Reeds-Shepp path length to the goal, also used for **analytic expansion**, attempting a direct,
   collision-checked Reeds-Shepp connection from the current node to the goal, which is what keeps
   obstacle-free scenarios fast (the very first attempt, on the root node, already succeeds when
-  there's nothing in the way, so the search degenerates to one `reeds_shepp_path()` call — the same
+  there's nothing in the way, so the search degenerates to one `reeds_shepp_path()` call: the same
   O(1) cost as `DubinsPlanner`). Fails loud (`PlanningFailure`) if the search budget
-  (`max_expansions=20,000`) is exhausted rather than returning a partial path — measured actual
+  (`max_expansions=20,000`) is exhausted rather than returning a partial path: measured actual
   usage across all 5 scenarios tops out at 75 expansions (`perpendicular_flanked`), a ~260x margin,
   so the default has real headroom rather than being sized to merely look sufficient.
 
@@ -288,13 +288,13 @@ for comparison):
 **A real finding from building it**: making the planner obstacle-aware surfaced a latent
 architecture assumption. `ControllerNode`'s reactive sensor-braking (brakes whenever *any* obstacle
 reading is closer than `brake_distance`) was written for M1's Dubins planner, which never
-deliberately gets close to an obstacle — so "sensor sees something within 3m" always meant "unplanned
+deliberately gets close to an obstacle (so "sensor sees something within 3m" always meant "unplanned
 hazard, stop." Once Hybrid A* started producing paths that *intentionally* pass within a vehicle's
 length of a parked car as part of a valid avoidance maneuver, that same braking logic triggered on
-every such approach and permanently stalled the vehicle before it ever reached the maneuver — measured
+every such approach and permanently stalled the vehicle before it ever reached the maneuver) measured
 directly (`perpendicular_flanked`: 0/5 success, 0/5 collision, i.e. braking safely forever). Fixed by
 `hybrid_astar.brake_distance_for(planner)`, which derives a smaller `brake_distance` from the
-planner's own guaranteed worst-case clearance (`vehicle_radius + safety_margin`, minus a buffer) —
+planner's own guaranteed worst-case clearance (`vehicle_radius + safety_margin`, minus a buffer):
 below that floor, no genuine avoidance maneuver can ever falsely trigger it, while it still catches
 truly unplanned proximity. `DubinsPlanner`/`ReedsSheppPlanner` (obstacle-blind) keep `ParkingHarness`'s
 original `brake_distance=3.0` default, which still needs the full physical-stopping-distance margin
@@ -302,31 +302,31 @@ since braking is the *only* thing preventing a collision for those planners.
 
 **A second real finding, from validating rather than just building**: fixing the brake-distance issue
 made `perpendicular_flanked` and `perpendicular_obstructed_lane` succeed reliably (5/5 seeds, both
-controllers), but `parallel_between_cars` — the tightest scenario, needing a genuine reverse-gear cusp
-between two close parked cars — exposed a real controller limitation rather than a planner bug. Pure
+controllers), but `parallel_between_cars` (the tightest scenario, needing a genuine reverse-gear cusp
+between two close parked cars) exposed a real controller limitation rather than a planner bug. Pure
 Pursuit's already-documented "no margin when curvature is already at the limit" weakness (Section 7)
 turned out to be a measured, *consistent* safety failure here, not noise-dependent flakiness: 5/5
 seeds collide, regardless of `brake_distance` or the planner's own `safety_margin` (widening the
-margin just traded the collision for Pure Pursuit never converging at all — confirmed it isn't a
+margin just traded the collision for Pure Pursuit never converging at all, confirmed it isn't a
 tuning problem). MPC's constraint-respecting rollout stays collision-free and converges reliably
-(5/5 seeds, up to ~880 of a raised 1000-step budget — Hybrid A*'s avoidance routes are longer and
+(5/5 seeds, up to ~880 of a raised 1000-step budget: Hybrid A*'s avoidance routes are longer and
 more circuitous than M1's direct paths ever needed to be). Rather than force both controllers to
 "succeed" via some numeric hack, this is documented as a real, scoped exception
-(`tests/test_simulation.py`'s `NEVER_SUCCEEDS`, pinned by its own regression test) — the same
+(`tests/test_simulation.py`'s `NEVER_SUCCEEDS`, pinned by its own regression test): the same
 honest treatment DESIGN.md already gives the Pure-Pursuit-vs-MPC tradeoff in the abstract, now
 concretely realized once a planner actually produces curvature-saturated, obstacle-hugging paths for
 Pure Pursuit to track.
 
 **Update, from fixing the collision itself (not just documenting it)**: the 5/5 collisions above
-turned out to trace to a second, independent defect, not just Pure Pursuit's tracking error --
+turned out to trace to a second, independent defect, not just Pure Pursuit's tracking error,
 `brake_distance_for`'s `buffer` parameter defaulted to exactly `HybridAStarPlanner.safety_margin`,
 which made the resulting `brake_distance` collapse to precisely `VEHICLE_RADIUS`, the literal
 collision boundary, so the emergency brake fired at the moment of contact rather than before it, for
 any speed. `ControllerNode` now runs a continuous, physics-based speed governor
 (`v_allowed = sqrt(2*a_max*gap)`, recomputed every tick from the live sensor range) instead of a
-fixed trigger distance -- verified to bring `parallel_between_cars`/Pure-Pursuit's collisions to 0/5
+fixed trigger distance: verified to bring `parallel_between_cars`/Pure-Pursuit's collisions to 0/5
 across the same 5 seeds, with zero regression on the other 9 (scenario, controller) pairs (still
-5/5 success each). Pure Pursuit still can't *complete* this maneuver (0/5 success, unchanged --
+5/5 success each). Pure Pursuit still can't *complete* this maneuver (0/5 success, unchanged:
 curvature saturation with zero correction margin is a real tracking limitation the speed governor
 can't paper over), but it now fails safe (stops short) instead of failing dangerously (collides).
 See `core/nodes/controller_node.py`'s module docstring and KNOWN_BUGS.md entry 2 for the full
@@ -334,40 +334,40 @@ account.
 
 Alternatives considered:
 
-- **RRT\*** — asymptotically optimal and simpler to implement than Hybrid A*, but produces
+- **RRT\***, asymptotically optimal and simpler to implement than Hybrid A*, but produces
   jerkier, less repeatable paths for this structured, low-dimensional scenario (car parking in a
   mostly-open lot), where a grid search is tractable and gives smoother, more predictable output.
   Hybrid A* is the better fit for a *structured* environment; RRT* earns its keep in cluttered,
   high-dimensional spaces this project doesn't have.
-- **Keep the fixed Dubins path, just add obstacle checks** — rejected for the same reason the
+- **Keep the fixed Dubins path, just add obstacle checks**: rejected for the same reason the
   Bezier curve was: it can't express "go around an obstacle in the way," only "stop in front of
   it."
-- **Full 12-formula Reeds-Shepp (CCC included)** — rejected for M2, on the assumption that CSC
+- **Full 12-formula Reeds-Shepp (CCC included)**, rejected for M2, on the assumption that CSC
   alone could become infeasible below 4x turning_radius. That assumption turned out to be wrong for
   this implementation (a rigorous search found no `(alpha, beta, d)` where all 4 CSC families fail
-  simultaneously) -- CCC (LRL/RLR) has since been added to `reeds_shepp.py` anyway, not because CSC
+  simultaneously): CCC (LRL/RLR) has since been added to `reeds_shepp.py` anyway, not because CSC
   needed the fallback, but because CCC produces measurably shorter paths in the close-pose regime
   (~30% of the time, sometimes ~2x shorter). Deliberately kept OFF for `HybridAStarPlanner` itself
-  (`include_ccc=False`) -- CCC's shorter paths are more curvature-aggressive, and enabling them
+  (`include_ccc=False`): CCC's shorter paths are more curvature-aggressive, and enabling them
   there measurably reopened Section 7's Pure-Pursuit-curvature-saturation finding on scenarios that
   were previously safe. Full account in KNOWN_BUGS.md entry 5.
 
 ## 7. Control
 
 Two controllers, presented as a deliberate comparison rather than a single "best" choice. Both
-act purely on `pose_estimate`, never on ground truth — `Controller.control()` takes anything with
+act purely on `pose_estimate`, never on ground truth: `Controller.control()` takes anything with
 `.x/.y/.theta` (`interfaces.HasPose`), so the same controller code runs unchanged whether it's
 handed a real `Vehicle` or a `PoseEstimateMsg`.
 
 | | Pure Pursuit (adaptive) | MPC |
 |---|---|---|
-| Approach | Geometric — chase a lookahead point on the path | Optimization — minimize predicted tracking error over a short horizon |
+| Approach | Geometric (chase a lookahead point on the path | Optimization) minimize predicted tracking error over a short horizon |
 | Solve method | Closed-form (arctan2), O(path length) per step | Direct-shooting nonlinear program, `scipy.optimize.minimize(SLSQP)`, warm-started each step |
 | Reverse handling | Direction flips when the lookahead point is behind the vehicle | Explicit in the model; `v` is simply a bounded optimization variable |
 | Tuning surface | Lookahead distance, max speed/accel | Horizon length, tracking/effort/smoothness cost weights |
-| Weakness | Reactive only — no margin when the path curvature is already at the vehicle's limit | ~2-3 ms per control step (SLSQP solve); more tuning parameters |
+| Weakness | Reactive only: no margin when the path curvature is already at the vehicle's limit | ~2-3 ms per control step (SLSQP solve); more tuning parameters |
 
-This comparison isn't just theoretical — running both controllers on the same Dubins paths
+This comparison isn't just theoretical, running both controllers on the same Dubins paths
 surfaced a real, measurable difference. A Dubins path sits *exactly* at the vehicle's curvature
 limit by construction (Section 6), which leaves Pure Pursuit's reactive steering law zero margin:
 any small lookahead-target misalignment demands more curvature than the vehicle can provide,
@@ -380,11 +380,11 @@ curvature-saturated, which is exactly the regime the comparison table above pred
 
 Once estimation noise entered the loop (Section 5), the same gap showed up again in a second
 form: Pure Pursuit's near-goal behavior settles into a small, persistent limit cycle (a known
-Pure Pursuit property — the lookahead target snaps to the final path point once everything's
+Pure Pursuit property, the lookahead target snaps to the final path point once everything's
 within `lookahead`, so the vehicle orbits it rather than converging exactly onto it), and with
 noisy position feedback that cycle's radius is comparable to the original success tolerance.
 That's why `tol` is 0.4 m (loosened from a pre-estimation 0.3 m) and why the test suite evaluates
-success as a **rate across 5 seeds**, not single-run determinism — asserting a threshold instead
+success as a **rate across 5 seeds**, not single-run determinism, asserting a threshold instead
 of 100% is the statistically honest way to validate a controller under real sensor noise, rather
 than picking a lucky seed and calling it done.
 
@@ -408,12 +408,12 @@ selectable per scenario via `demo.py --controller mpc`.
   `harness.py` and `planning/hybrid_astar.py` so both collision checks use the exact same
   threshold) is modeled the same
   way and has to be on the same scale as the obstacles it shares the lot with (1.0 m, vs. ~1.3 m
-  for a parked car) — an earlier, much smaller placeholder value (0.3 m) made the vehicle roughly
+  for a parked car): an earlier, much smaller placeholder value (0.3 m) made the vehicle roughly
   four times "thinner" than the cars around it for collision purposes, which under-reports real
   collisions rather than causing loud failures, exactly the kind of bug that's easy to miss.
 - **Brake-trigger distance sized from stopping physics *and* the vehicle's own size, not picked
   by feel**: `brake_distance` must exceed stopping distance (`v_max^2 / (2*a_max)`, ~1.4 m at
-  this project's speeds/accel limits) **plus `VEHICLE_RADIUS`**, plus margin — not stopping
+  this project's speeds/accel limits) **plus `VEHICLE_RADIUS`**, plus margin, not stopping
   distance alone. The sensor reading it's compared against measures from the vehicle's center to
   the obstacle's *surface*, but collision is checked center-to-center against `VEHICLE_RADIUS +
   obstacle.radius`, so the vehicle's own radius is part of the required margin, not just how
@@ -426,36 +426,41 @@ selectable per scenario via `demo.py --controller mpc`.
 - Localization, not SLAM: landmark (obstacle) positions are assumed known in advance. The vehicle
   estimates its own pose against a known map; it doesn't build one.
 - Single-hypothesis estimation: the EKF assumes a unimodal Gaussian belief. A genuinely ambiguous
-  situation (e.g. two landmarks that look identical from certain angles) isn't modeled — that's
+  situation (e.g. two landmarks that look identical from certain angles) isn't modeled; that's
   what particle filters are for, and it's an explicit non-goal here (Section 10).
-- No sensor dropout/failure modeling — every sensor is assumed to report every tick it's due,
+- No sensor dropout/failure modeling: every sensor is assumed to report every tick it's due,
   possibly noisy but never missing or stale.
 - 2D, flat ground plane only.
 - Obstacles are approximated as circles, which over-estimates the footprint of non-circular
   obstacles (a conservative simplification, not a correctness bug).
+- The ego's collision footprint is a 1.0 m circle, smaller than the 4.5 x 1.8 m body drawn in the
+  animations and the 3D viewer. On the exported runs the MPC parking runs never overlap an obstacle by
+  more than 2 cm, but Pure Pursuit's stop on `parallel_between_cars` leaves the drawn nose about 1.2 m
+  inside the obstacle's circle. "Fails safe" therefore holds under the simulator's collision model,
+  not for the drawn footprint.
 
 ## 10. Future extensions
 
 - ~~Learned parking policy (RL)~~: built. `core/rl/parking_env.py`'s `ParkingEnv` (a Gymnasium
-  environment, ground-truth state, no Bus/EKF graph) wraps a single end-to-end policy -- raw
-  sensing + goal offset in, `(v, delta)` out directly, no explicit path plan at all -- trained with
+  environment, ground-truth state, no Bus/EKF graph) wraps a single end-to-end policy (raw
+  sensing + goal offset in, `(v, delta)` out directly, no explicit path plan at all) trained with
   PPO (Stable-Baselines3, pulling in `torch`; kept as an opt-in `rl` extra in `pyproject.toml`, not
   a core dependency, given this project's dependency-light precedent everywhere else). **Measured
   against the real baseline** (`core/validation/rl_comparison.py`, `core/data/rl/PROVENANCE.md` has
   the full numbers): on both an obstacle-free scenario and one with two real parked-car obstacles to
   route around, the trained policy reaches the goal 100% of the time across 5 seeds, never collides,
-  and does it in ~65 steps versus the baseline's 261-365 -- genuinely reaches the goal reliably and
+  and does it in ~65 steps versus the baseline's 261-365, genuinely reaches the goal reliably and
   safely, not just moves toward it. **Important caveat, not glossed over**: this isn't a fair fight
-  in the baseline's favor -- the policy trains and is evaluated on ground truth (no sensor noise the
+  in the baseline's favor, the policy trains and is evaluated on ground truth (no sensor noise the
   baseline has to contend with), and it's only been tested on scenarios where a direct-ish path to
   the goal is actually available, not the project's genuinely tight ones (`parallel_between_cars`,
   `perpendicular_obstructed_lane`) that need a real detour or reverse-gear cusp. A true head-to-head
   under identical noisy conditions, and on the scenarios that actually stress a path-planning
   algorithm, is real follow-up work.
 - ~~Dynamic obstacles requiring re-planning mid-maneuver~~: the re-planning machinery itself is
-  built (KNOWN_BUGS.md entry 3, now closed -- stall detection triggers `PlannerNode` to re-plan
+  built (KNOWN_BUGS.md entry 3, now closed, stall detection triggers `PlannerNode` to re-plan
   against the live obstacle list, verified end-to-end with a real closed-loop recovery). What's
-  still missing is genuinely *moving* obstacles (other vehicles, pedestrians in motion) -- entry 3's
+  still missing is genuinely *moving* obstacles (other vehicles, pedestrians in motion): entry 3's
   scenario is a new *static* obstacle appearing mid-run once, not something that keeps moving after
   it appears, so a re-plan never has to react to a target that's still changing.
 - ~~Sensor dropout/latency modeling~~: built (KNOWN_BUGS.md entry 7). `SensorNode` can drop each
@@ -463,11 +468,11 @@ selectable per scenario via `demo.py --controller mpc`.
   real bug (the reactive speed governor trusted a delayed obstacle reading as current, and collided
   under even modest latency) and fixed it with a worst-case margin, the same pattern entry 2's
   `stopping_buffer` already used for the base sense-decide-act latency. What's confirmed *not*
-  closed: latency beyond ~10-20 ticks still causes real collisions via a different path -- delayed
+  closed: latency beyond ~10-20 ticks still causes real collisions via a different path, delayed
   EKF corrections let dead-reckoning drift enough that a reactive controller can steer the true
   vehicle somewhere the (wrongly) estimated vehicle would have cleared. Closing that needs real
-  out-of-sequence-measurement handling in the EKF, not another margin -- entry 7 has the full account.
-- ~~Particle filter or UKF as an alternative to the EKF~~: built (`core/estimation/ukf.py`) --
+  out-of-sequence-measurement handling in the EKF, not another margin: entry 7 has the full account.
+- ~~Particle filter or UKF as an alternative to the EKF~~: built (`core/estimation/ukf.py`),
   chose UKF over a particle filter since this domain never actually has a multi-modal belief (one
   well-observed vehicle, Gaussian sensor noise, no data-association ambiguity), so the honest
   question was specifically "strongly-nonlinear," which UKF answers directly via sigma-point
@@ -479,60 +484,60 @@ selectable per scenario via `demo.py --controller mpc`.
   radius (~3.9m, the most nonlinear regime the kinematic model can produce, not an arbitrary
   extreme), they differ by ~0.1% (0.138m vs. 0.138m). A supplementary sweep pushing `dt` well past
   this project's real 0.1s confirmed the gap does grow with step size, as linearization theory
-  predicts -- so the near-identical result at real operating parameters is a genuine finding (the
+  predicts, so the near-identical result at real operating parameters is a genuine finding (the
   approximation really is fine here), not a bug quietly making both filters equally wrong.
 - ~~ROS2 bridge~~: written (`core/messaging/ros2_bridge.py`), but **not verified against a real
-  ROS2 install** — flagged plainly rather than silently claimed done, unlike every other item in
+  ROS2 install**, flagged plainly rather than silently claimed done, unlike every other item in
   this list. ROS2/rclpy could not be installed in this development environment: WSL2 (the standard
   way to run ROS2 on Windows) isn't functional on this machine, and `rclpy` isn't pip-installable
   standalone. What *is* tested (`tests/test_ros2_bridge.py`): the message-conversion functions
   (`PoseEstimateMsg`/`ControlCmdMsg`/`ObstacleRangeMsg`/`PathMsg` → ROS2-shaped kwargs, including a
   regression for the covariance-flattening index mapping) and `Ros2Bridge`'s subscribe → convert →
   publish wiring, both against minimal stand-ins for `rclpy`'s `Node`/`Publisher` rather than the
-  real thing — the bridge is written against narrow `Protocol`s specifically so it never imports
+  real thing: the bridge is written against narrow `Protocol`s specifically so it never imports
   `rclpy` at all, and stays testable without one. What's unverified is whether real `rclpy`'s actual
   API matches those stand-ins closely enough; that needs a real ROS2 environment to check.
 
 ## 11. Adaptive cruise control (H1)
 
 The first highway-mode capability: given a lead vehicle ahead, control the ego vehicle's
-longitudinal acceleration to follow it safely and comfortably. Straight-line only (no steering)
-— lane centering (Section 12, H3) adds the lateral half. Reuses `messaging/`'s pub/sub pattern
+longitudinal acceleration to follow it safely and comfortably. Straight-line only (no steering):
+lane centering (Section 12, H3) adds the lateral half. Reuses `messaging/`'s pub/sub pattern
 (`LeadVehicleStateMsg`, `RadarMsg`, `LongitudinalCmdMsg`) and the "ground-truth node the
 controller never sees directly" principle (`EgoLongitudinalStateMsg`/`LeadVehicleStateMsg` are
 only consumed by `RadarNode` and the harness's own evaluation logic; `AccControllerNode` only
 ever sees noisy radar), but with a lightweight 1D point-mass ego model
-(`nodes/ego_longitudinal_node.py`) rather than the full 2D kinematic bicycle `Vehicle` — H1 is a
+(`nodes/ego_longitudinal_node.py`) rather than the full 2D kinematic bicycle `Vehicle`: H1 is a
 straight-line problem, so the extra state (heading, steering) would be unused until H3 brings
 lateral control into the picture.
 
 **Two controllers**, the same comparison device used for parking (Pure Pursuit vs. MPC), applied
 to car-following instead of path tracking:
 
-- **IDM (Intelligent Driver Model)**, Treiber, Hennecke & Helbing (2000) — the literature-standard
+- **IDM (Intelligent Driver Model)**, Treiber, Hennecke & Helbing (2000): the literature-standard
   car-following law, closed-form and reactive like Pure Pursuit was:
   `a = a_max * (1 - (v/v0)^delta - (s*/s)^2)`, where the desired gap
   `s* = s0 + v*T + (v*Δv) / (2*sqrt(a_max*b))` combines a minimum standstill distance, a
   time-headway term, and a closing-speed term. Reference parameter ranges are from the original
   paper and widely-used traffic-simulation defaults (e.g. SUMO's), not hand-tuned for this
-  project. The raw formula's `(s*/gap)^2` interaction term is **unbounded** as gap shrinks — a
+  project. The raw formula's `(s*/gap)^2` interaction term is **unbounded** as gap shrinks: a
   real car can't decelerate at whatever multiple of `a_max` that implies, so the controller clips
-  its output to a physical floor (`a_min`, default -9 m/s², ~1g emergency braking) — this was
+  its output to a physical floor (`a_min`, default -9 m/s², ~1g emergency braking), this was
   caught by a standalone sanity test *before* wiring the controller into a node (it returned
   -1309 m/s² for a plausible close/closing scenario), not discovered later via a failing
   integration test.
 - **MPC-based ACC**, reusing the direct-shooting SLSQP pattern from `control/mpc.py`, but a step
   beyond the parking MPC: parking's MPC only used box bounds; this one adds a genuine nonlinear
   **inequality constraint** (`gap(t) >= min_gap` at every step in the horizon, via
-  `scipy.optimize.minimize`'s `constraints` argument) — a hard safety constraint enforced by the
+  `scipy.optimize.minimize`'s `constraints` argument), a hard safety constraint enforced by the
   optimizer itself, not folded into the cost as a soft, tradeable-off penalty. The lead vehicle is
   assumed to hold constant velocity over the horizon (the standard simplifying prediction used in
   real ACC/MPC literature), re-solved every tick from the latest radar reading so it's
   continuously corrected rather than a long-range forecast.
 
 **A real finding from validating against NGSIM** (not a hypothetical caveat): if the ego ever
-ends up closer than `min_gap` while both vehicles are stopped — which can happen during the
-approach to a standstill in real stop-and-go traffic — there is *no feasible acceleration
+ends up closer than `min_gap` while both vehicles are stopped (which can happen during the
+approach to a standstill in real stop-and-go traffic) there is *no feasible acceleration
 sequence* that satisfies the constraint from there, since moving apart from a standstill would
 require driving backward, which the ego can't do. The constrained optimization becomes locally
 infeasible, and SLSQP silently returns its best constraint-violating attempt rather than failing
@@ -540,19 +545,19 @@ loudly. This is a genuine property of *nominal* (non-robust) MPC under model mis
 constant-velocity prediction and real driver behavior, not a bug to hide: across a range of
 `min_gap` values, the realized minimum gap consistently landed ~0.5 m below the nominal target,
 so `min_gap` defaults to 3.0 m (not the more natural-looking 2.0) specifically to keep the
-*realized* worst case comfortably positive — a value picked from measured erosion, not chosen to
+*realized* worst case comfortably positive: a value picked from measured erosion, not chosen to
 look right on paper.
 
 **Update, from fixing the infeasibility itself**: the constant `min_gap` constraint was the actual
-defect, not just a tuning target -- it could demand a gap no acceleration sequence could deliver.
+defect, not just a tuning target, it could demand a gap no acceleration sequence could deliver.
 `MpcAccController._effective_min_gap` now computes a *per-horizon-step* floor from a concrete,
 always-feasible witness trajectory (braking at `a_min` every step from the current state), and
 clamps the constraint to `min(min_gap, that floor)` at each step rather than one flat number for the
-whole horizon -- so the NLP SLSQP solves is provably feasible at every point, not just wherever
+whole horizon, so the NLP SLSQP solves is provably feasible at every point, not just wherever
 happened to be easiest. `_cost`'s `desired_gap` term is unchanged, so the optimizer still pulls back
 toward the full `min_gap` whenever that's actually reachable. Measured effect on the same NGSIM
 standstill case: realized minimum gap at `min_gap=3.0` improved from 2.44 m (~0.56 m erosion) to
-2.79 m (~0.21 m erosion) -- and the remaining ~0.21 m was confirmed to trace to `RadarNode`'s own
+2.79 m (~0.21 m erosion), and the remaining ~0.21 m was confirmed to trace to `RadarNode`'s own
 measurement noise (`range_std=0.5`), not to any remaining infeasibility, by comparing each tick's
 promised next-step floor against the next tick's *true* realized gap. A full robust/stochastic MPC
 (tightening the constraint by a confidence margin proportional to lead-vehicle prediction
@@ -564,106 +569,106 @@ NGSIM leader/follower pair's recorded trajectory (US-101 freeway, congested traf
 full stop, 78 seconds) through `LeadVehicleNode`, running *our* controller as the follower. Unlike
 the KITTI EKF validation (replaying real data through an unmodified estimator and comparing its
 output directly against ground truth), a controller's closed-loop behavior isn't directly
-comparable to what a human driver actually did — so this validates three different things
+comparable to what a human driver actually did, so this validates three different things
 instead: safety (gap never reaches zero, a hard pass/fail, same pattern as parking's
 `test_never_collides`), comfort (bounded jerk), and plausibility (our controller's resulting mean
-gap lands in a realistic range relative to the real follower's own recorded gap — a sanity check,
+gap lands in a realistic range relative to the real follower's own recorded gap: a sanity check,
 not a strict target, since the real driver isn't assumed optimal).
 
 ## 12. Highway-mode roadmap (H2-H4)
 
-- **H2 — Sensor fusion: extend the EKF with a speed state: done.** Added `predict_with_speed_state`
+- **H2: Sensor fusion: extend the EKF with a speed state: done.** Added `predict_with_speed_state`
   and `update_speed` to `ExtendedKalmanFilter` as new methods alongside the original 3-state
-  `predict` (left completely untouched, on purpose — see below), giving a `[x, y, theta, v]` mode
+  `predict` (left completely untouched, on purpose, see below), giving a `[x, y, theta, v]` mode
   where speed is fused from noisy acceleration odometry + a noisy speedometer, rather than
   (Section 11's H1 scope note) being read as ground truth. `AccControllerNode` now consumes
-  `EgoSpeedEstimateMsg` (the fused estimate) instead of true speed for its own speed input — the
+  `EgoSpeedEstimateMsg` (the fused estimate) instead of true speed for its own speed input: the
   ego's true state is now visible only to `RadarNode` and the harness's evaluation logic, same
   boundary as the rest of the project. Effect on outcomes: both ACC controllers' realized minimum
-  gap on the NGSIM validation shifted by only ~4-8 cm (IDM 2.00→1.96 m, MPC 2.52→2.44 m) —
+  gap on the NGSIM validation shifted by only ~4-8 cm (IDM 2.00→1.96 m, MPC 2.52→2.44 m),
   estimation noise at these levels doesn't meaningfully erode the safety margin already built in
   from Section 11's `min_gap` finding.
 
   **Design choice**: rather than rewrite `predict()` to take acceleration instead of speed (which
-  would risk the parking mode's already-validated 3-state path — 83% RMSE reduction against real
+  would risk the parking mode's already-validated 3-state path, 83% RMSE reduction against real
   KITTI data, per IMPLEMENTATION.md's MV milestone), the 4-state mode is purely additive: two new
   methods, plus generalizing `_apply_update`/`update_heading`/`update_position`/`update_landmark`
   to size themselves off `len(self.x)` instead of a hardcoded 3 (so they keep working unchanged
   for a 4-state instance). Verified as a true zero-behavior-change refactor for the 3-state case
   by re-running the full existing EKF test suite *and* the KITTI validation and checking the RMSE
   numbers came back bit-for-bit identical (0.845 m / 4.966 m / 83.0%), not just "tests still
-  green" — a green test suite proves the tested paths didn't change, not that nothing did.
+  green": a green test suite proves the tested paths didn't change, not that nothing did.
 
   For H1's straight-line-only case, the 4-state filter's `x`/`y`/`theta` dimensions are
-  degenerate (heading stays 0, no lateral motion) — reusing the general filter here rather than
+  degenerate (heading stays 0, no lateral motion), reusing the general filter here rather than
   building a separate 1D linear Kalman filter (which would be more "correct" for this specific
   subproblem, since 1D constant-acceleration motion is linear and doesn't need an EKF's
   linearization at all) is a deliberate forward-compatibility tradeoff: H3 needs the full state
   anyway, and building a throwaway 1D filter just for H1 would mean redoing this integration work
   a second time.
-- **H3 — Lane centering: done.** Stanley controller (`control/lane_centering.py`:
-  `delta = heading_error + atan2(k * cross_track_error, v)`) — the classical lane-keeping law,
+- **H3, Lane centering: done.** Stanley controller (`control/lane_centering.py`:
+  `delta = heading_error + atan2(k * cross_track_error, v)`), the classical lane-keeping law,
   playing the same "geometric baseline" role Pure Pursuit and IDM play elsewhere. Cross-track
-  error is measured at the *front axle*, not the vehicle's rear-axle reference point — steering
+  error is measured at the *front axle*, not the vehicle's rear-axle reference point, steering
   corrects what's actually about to leave the lane. Brings the full 2D `Vehicle` bicycle model
   back into the highway mode (unmodified, same as parking uses it).
 
   **Real lane geometry, not hand-authored**: `lane_centerline.csv` aggregates ~10,400 individual
   real vehicle positions from NGSIM's US-101 lane 2 (the full download, not just H1's committed
-  leader/follower excerpt), binned every 2m and lightly smoothed — a genuine 1.76m end-to-end
+  leader/follower excerpt), binned every 2m and lightly smoothed, a genuine 1.76m end-to-end
   lateral drift over 642m, real curvature nobody typed in by hand. The same dataset now validates
   both H1 (real time-series replay) and H3 (real spatial geometry), two different uses of one
   source. Validation methodology differs from H1's replay style, though: NGSIM records where real
-  drivers actually *were*, not a reference path independent of their own steering — so there's no
+  drivers actually *were*, not a reference path independent of their own steering, so there's no
   "real trajectory" to replay a controller against the way there was a real leader's speed
   profile. Instead, `validation/lane_centering_validation.py` checks that Stanley's closed-loop
   tracking error, once settled, stays under real drivers' own lateral positioning scatter on this
-  lane (std ≈0.46 m) — the plausibility bar, not a strict target, since there's no single
+  lane (std ≈0.46 m): the plausibility bar, not a strict target, since there's no single
   "correct" lateral position within a lane.
 
-  **A real sign-convention bug, caught the same way H1's bugs were** — standalone, before
+  **A real sign-convention bug, caught the same way H1's bugs were**: standalone, before
   anything downstream could mask it: the first implementation defined cross-track error with the
   sign flipped, so the correction term steered *away* from the path instead of toward it. This
-  didn't error or look obviously wrong in the formula — it just diverged, from a 2 m offset to
+  didn't error or look obviously wrong in the formula; it just diverged, from a 2 m offset to
   374 m within 30 seconds, caught by a direct convergence check run before building the
   validation module on top of it. `tests/test_lane_centering.py` now checks convergence from
   *both* directions specifically because a sign bug can look correct from only one side.
 
   **Explicitly not yet done**: this validates Stanley alone (constant assumed speed, lateral
-  control only) — it does not yet combine with ACC (H1/H2) into one closed loop where a single
+  control only), it does not yet combine with ACC (H1/H2) into one closed loop where a single
   `Vehicle` takes both an ACC-computed speed and a Stanley-computed steering angle each tick.
   That integration is real follow-up work, not attempted in this pass, the same way H1 shipped
   ACC standalone before H2 extended it rather than building everything simultaneously.
-- **H4 — Intersection navigation: done.** `control/intersection.py`'s `IntersectionNavigator`: a
+- **H4: Intersection navigation: done.** `control/intersection.py`'s `IntersectionNavigator`: a
   3-state machine (`APPROACHING` → `STOPPED` → `PROCEEDING`) for a stop-sign-controlled
-  intersection, built on H1 rather than new control theory — genuinely just reasoning wired on
+  intersection, built on H1 rather than new control theory, genuinely just reasoning wired on
   top of existing control. The stop line is modeled as a *stationary virtual lead vehicle*
   (`lead_speed=0`) at a fixed position, so "decelerate smoothly and stop behind it" directly
-  reuses `IDMController` — exactly the standstill car-following behavior H1/H2 already validated
+  reuses `IDMController`, exactly the standstill car-following behavior H1/H2 already validated
   against real congested-traffic data, not new math. Right-of-way: first vehicle to *fully stop*
-  gets priority; simultaneous stops yield to the right — the standard real-world 4-way-stop rule,
+  gets priority; simultaneous stops yield to the right, the standard real-world 4-way-stop rule,
   not invented for this project.
 
   **Scope**: models the intersection as a single conflict point two independent approaches share,
-  not full 2D multi-direction intersection geometry — this captures the actual substance of
+  not full 2D multi-direction intersection geometry, this captures the actual substance of
   right-of-way reasoning (mutual exclusion + arrival-order priority) without needing to simulate
   a full 4-way intersection's road layout, the same kind of tight scoping H1 (longitudinal-only)
   and H3 (not yet combined with H1) already used. Validated against hand-authored scenarios (same
-  pattern as parking's obstacle scenarios, not derived from a real dataset — the point is
+  pattern as parking's obstacle scenarios, not derived from a real dataset: the point is
   exercising specific right-of-way branches: no conflict, ego-arrived-first, other-arrived-first,
   simultaneous-arrival-yield-right, simultaneous-arrival-no-yield-left) since real intersection
-  datasets (INTERACTION, inD) are registration-gated, like highD (below) — an optional upgrade,
+  datasets (INTERACTION, inD) are registration-gated, like highD (below): an optional upgrade,
   not a blocker. Every scenario also asserts the ego vehicle never crosses the stop line without
-  having fully stopped first — compliance, not just liveness.
-- **Full closed-loop highway drive (H5), Phase A — H1+H2+H3 on one Vehicle: done.**
+  having fully stopped first: compliance, not just liveness.
+- **Full closed-loop highway drive (H5), Phase A, H1+H2+H3 on one Vehicle: done.**
   `core/full_highway_harness.py`'s `FullHighwayHarness`: a real `Vehicle` whose speed comes from
   ACC (H1, radar-gap car-following against a real replayed NGSIM leader) and whose steering comes
   from Stanley (H3, tracking a real NGSIM-derived lane centerline), both fused by one 4-state EKF
   (H2). `core/nodes/highway_vehicle_node.py`'s `HighwayVehicleNode` is the new ego plant node this
-  needed — deliberately not a modification of `EgoLongitudinalNode` (which H1/H2-standalone keep
+  needed, deliberately not a modification of `EgoLongitudinalNode` (which H1/H2-standalone keep
   using unchanged, same "two nodes for two genuinely different situations" precedent as the EKF's
   own `predict()`/`predict_with_speed_state()` split) and not parking's `VehicleNode` either (which
-  tracks a *desired speed* via its own P-controller — ACC's controllers command *acceleration*
+  tracks a *desired speed* via its own P-controller: ACC's controllers command *acceleration*
   directly, and validated their safety behavior, e.g. IDM's `a_min=-9` floor, against that exact
   integration; routing it through a second desired-speed-tracking layer would have quietly changed
   H1/H2's already-NGSIM-validated closed-loop dynamics). `core/control/lane_geometry.py` handles
@@ -672,13 +677,13 @@ not a strict target, since the real driver isn't assumed optimal).
 
   **Real data, now the same NGSIM lane** (closed KNOWN_BUGS.md's former entry 6): the lane
   centerline and the replayed leader are both NGSIM US-101 **lane 2**. This used to be two
-  geometrically-overlapping-but-different-lane extracts (leader recorded in lane 1) — documented
+  geometrically-overlapping-but-different-lane extracts (leader recorded in lane 1): documented
   rather than hidden, but not lane-precise. Closed by re-extracting a lane-2 leader/follower pair
   (`vehicle_id` 2896/2903, same public Socrata source, same real full-stop character as the
-  original) — see `core/data/ngsim/ATTRIBUTION.md`. **A real finding from re-validating against
+  original): see `core/data/ngsim/ATTRIBUTION.md`. **A real finding from re-validating against
   it**: this leader's genuine recorded full stop measurably (if temporarily) stresses the composed
-  EKF/Stanley loop during the low-speed restart — Stanley's `atan2(k*cte, speed)` correction is
-  weakest exactly when speed is lowest, by design — confirmed as a real, understood, converging
+  EKF/Stanley loop during the low-speed restart (Stanley's `atan2(k*cte, speed)` correction is
+  weakest exactly when speed is lowest, by design) confirmed as a real, understood, converging
   transient (not a failure to converge) across every (controller, seed) pair tried; see
   `tests/test_full_highway.py`'s cross-track convergence test.
 
@@ -686,7 +691,7 @@ not a strict target, since the real driver isn't assumed optimal).
   reason**: H1's straight-line-only use kept `delta` at exactly 0 forever, which zeroed out every
   code path these bugs lived in.
   1. `predict_with_speed_state` propagated x/y/theta using the *prior* speed, then updated speed
-     separately — but every plant node (`EgoLongitudinalNode`, and now `HighwayVehicleNode`)
+     separately, but every plant node (`EgoLongitudinalNode`, and now `HighwayVehicleNode`)
      computes the *new* speed first and integrates `Vehicle.update` with that. With `delta=0`,
      `dtheta` is zero regardless of which speed is used, so the mismatch was completely invisible
      under H1. Once Stanley commanded real nonzero steering, it produced a small but systematic
@@ -694,7 +699,7 @@ not a strict target, since the real driver isn't assumed optimal).
      never saw. Fixed by computing `v_new = v + accel*dt` first and using it throughout, matching
      the plant's own convention exactly (re-derived the Jacobian accordingly).
   2. `predict_with_speed_state`'s process noise `Q` only ever modeled acceleration uncertainty
-     (`q[3,3]`) — unlike the 3-state `predict()`, which properly propagates *both* the odometry
+     (`q[3,3]`): unlike the 3-state `predict()`, which properly propagates *both* the odometry
      speed's and the odometry steering angle's uncertainty into position/heading uncertainty via a
      full input-Jacobian `V @ M @ Vᵀ` term. With `delta=0` this gap was invisible (every
      `tan(delta)`-dependent term is zero); with real steering noise actually driving `dtheta` each
@@ -702,36 +707,36 @@ not a strict target, since the real driver isn't assumed optimal).
      too lightly to keep pace with real drift. Fixed by generalizing to the same input-Jacobian
      approach `predict()` already uses, reusing the existing `odom_delta_std` constructor parameter
      (never previously read by this method) for steering-reading uncertainty.
-  3. The highway EKF had **no absolute heading or position correction at all** — no compass,
+  3. The highway EKF had **no absolute heading or position correction at all**: no compass,
      position fix, or landmark equivalent, unlike parking's full three-sensor EKF. That was
      invisible under H1/H2 because nothing ever *used* the estimate's x/y/theta (only its `.speed`
-     was consumed) — pure dead reckoning drifting was harmless when nobody was looking at where it
+     was consumed): pure dead reckoning drifting was harmless when nobody was looking at where it
      drifted to. Once Stanley started steering off the estimate, realistic steering-sensor noise
      random-walked the heading estimate away from truth over the ~600m/78s scenario, and the
      control loop faithfully kept the *estimate* near the lane while the *true* vehicle wandered
-     meters away — a textbook illustration of why real ADAS lateral control needs more than wheel/
+     meters away: a textbook illustration of why real ADAS lateral control needs more than wheel/
      IMU dead reckoning. Fixed by having `HighwayVehicleNode` also publish an always-on noisy
-     compass and a low-rate noisy position fix — reusing `CompassMsg`/`PositionFixMsg`/
+     compass and a low-rate noisy position fix, reusing `CompassMsg`/`PositionFixMsg`/
      `update_heading`/`update_position` completely unchanged, exactly the reuse H2's own original
      design already anticipated by generalizing those methods to `len(self.x)` instead of a
      hardcoded 3.
 
   With all three fixed: cross-track error never exceeds its initial offset (i.e. genuinely
-  converges, not just "stays finite") and settles to an RMS of ~0.27-0.33m across seeds — safely
-  under H3 standalone's own real-driver-lateral-scatter bar (0.46m) — while ACC's gap-keeping
+  converges, not just "stays finite") and settles to an RMS of ~0.27-0.33m across seeds, safely
+  under H3 standalone's own real-driver-lateral-scatter bar (0.46m), while ACC's gap-keeping
   behavior (min gap ~2.2m) matches H1/H2's own standalone numbers, confirming H1/H2's dynamics
   really did carry over unchanged. `tests/test_full_highway.py` checks collision safety, real
   NGSIM data coherence, cross-track-error plausibility, gap plausibility, determinism, and pins the
   H2 fix with a direct regression test (feed a real nonzero steering reading, assert the filter's
-  heading actually moves — impossible if `delta` were still hardcoded to 0).
+  heading actually moves: impossible if `delta` were still hardcoded to 0).
 
   **Re-measured against the lane-2 leader** (once the lane-1-vs-lane-2 mismatch above was closed):
-  RMS 0.22-0.35m across seeds, min gap ~1.78m — both figures shifted somewhat (a genuinely
+  RMS 0.22-0.35m across seeds, min gap ~1.78m, both figures shifted somewhat (a genuinely
   different real leader vehicle, not the same trajectory replayed on a different lane), but the
   qualitative result is unchanged: still safely under the 0.46m bar, still never exceeds its
   initial offset, still collision-free. The 0.27-0.33m/~2.2m figures above are the original
   (lane-1-leader) measurement, left as historical record rather than silently overwritten.
-- **Full closed-loop highway drive (H5), Phase B — H4 routing: done.** `IntersectionNavigator`
+- **Full closed-loop highway drive (H5), Phase B: H4 routing: done.** `IntersectionNavigator`
   layered on top of Phase A by composing its stop-line/right-of-way accel with ACC's real-lead-
   vehicle accel via `nodes/longitudinal_arbiter_node.py`'s `LongitudinalArbiterNode`: `min()` over
   every registered accel-candidate topic, the more conservative demand wins each tick.
@@ -740,7 +745,7 @@ not a strict target, since the real driver isn't assumed optimal).
   a *candidate* instead of the final command. `nodes/intersection_controller_node.py`'s
   `IntersectionControllerNode` wraps `IntersectionNavigator` the same "store latest, act once per
   tick" pattern every other controller node uses, feeding it the **fused pose+speed estimate**
-  (via `lane_geometry.project_to_arc_length`) rather than ground truth — the first time H4 has had
+  (via `lane_geometry.project_to_arc_length`) rather than ground truth: the first time H4 has had
   to follow the "controllers only see estimates" rule at all (its own standalone harness uses true
   state directly, justified there by having no EKF running in that mode at all; that justification
   stops applying once it's wired into a loop that has one).
@@ -748,18 +753,18 @@ not a strict target, since the real driver isn't assumed optimal).
   Built deliberately after Phase A, not in the same pass, because the composition has a real,
   non-obvious edge case worth its own focused test: `IntersectionNavigator`'s approach-to-stop-line
   constants were validated standalone assuming *sole* authority over the whole approach, so if ACC
-  is less conservative for the early/middle part of the approach (the common case — no real lead
+  is less conservative for the early/middle part of the approach (the common case: no real lead
   vehicle nearby to slow it down), the realized speed near the line could in principle be higher
   than the standalone-validated trajectory ever reaches at that distance, risking the same "ran the
-  stop sign" failure mode H4's own tests already guard against — caused by composition, not either
+  stop sign" failure mode H4's own tests already guard against: caused by composition, not either
   component alone. **Directly stress-tested, not just reasoned about**: a synthetic scenario with a
-  fast (30 m/s), effectively non-blocking lead vehicle — deliberately the worst case, ACC free to
-  cruise at its own high `v0` the entire approach with nothing slowing it down early — still stops
+  fast (30 m/s), effectively non-blocking lead vehicle (deliberately the worst case, ACC free to
+  cruise at its own high `v0` the entire approach with nothing slowing it down early) still stops
   cleanly before the line (measured: ego speed drops to ~6.9 m/s by 10m out, well within the
   detection window, regardless of how fast it was cruising moments before). This holds because both
   `IDMController.control()` and `IntersectionNavigator.control()` are memoryless functions of the
   current tick's actual `(position, speed)`, and the intersection candidate's braking demand grows
-  smoothly and unboundedly (down to the shared `a_min` floor) as the gap to the stop line shrinks —
+  smoothly and unboundedly (down to the shared `a_min` floor) as the gap to the stop line shrinks,
   so there's always a point close enough to the line where it overtakes ACC's cruise-accel demand
   in the `min()` comparison, regardless of how permissive ACC was further back. `test_full_highway.py`
   pins this down as a real regression test (not just a one-off check) plus the four right-of-way
@@ -772,14 +777,14 @@ not a strict target, since the real driver isn't assumed optimal).
   actually deviating from the constant-velocity assumption.
 - **highD dataset upgrade for H3**: richer, pre-extracted lane geometry and maneuvers than NGSIM
   provides, free for non-commercial use but registration-gated (a manual data-request form, no
-  anonymous download) — worth it once lane geometry precision actually matters, not required to
+  anonymous download), worth it once lane geometry precision actually matters, not required to
   build H3 in the first place.
 - ~~Turning movements at a real 2D intersection~~: done. `control/intersection_geometry.py` +
-  `intersection2d_harness.py` (built after this section was first written -- see KNOWN_BUGS.md
+  `intersection2d_harness.py` (built after this section was first written, see KNOWN_BUGS.md
   entry 4, now closed) give H4 real crossing paths, N-way approaches, geometric collision
   verification, and turning vehicles (a real curved connector reusing `DubinsPlanner` between
   approaches, plus a left-yields-to-oncoming-straight-traffic rule), running several unmodified
   `IntersectionNavigator` instances through one shared intersection instead of H4's original single
   scripted `OtherVehicleStatus`. A known, accepted residual: the yield rule can produce a permanent
-  (but never unsafe) multi-vehicle wait cycle in rare mixed-turn arrival patterns -- see entry 4 for
+  (but never unsafe) multi-vehicle wait cycle in rare mixed-turn arrival patterns, see entry 4 for
   why closing that fully needs a global precedence graph, out of scope so far.

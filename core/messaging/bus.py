@@ -1,4 +1,4 @@
-"""Minimal synchronous pub/sub bus -- deterministic dispatch, not a real async executor,
+"""Minimal synchronous pub/sub bus: deterministic dispatch, not a real async executor,
 since tests and demos need reproducibility more than realistic ROS2 timing. See DESIGN.md section 2."""
 
 from collections.abc import Callable

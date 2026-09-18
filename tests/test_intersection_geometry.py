@@ -37,7 +37,7 @@ def test_is_to_the_right_is_not_true_for_opposite_or_left():
 
 
 def test_parallel_approaches_never_conflict():
-    """North and South share a road but not a lane or crossing path -- the single-
+    """North and South share a road but not a lane or crossing path: the single-
     conflict-point model can't express "these don't interact"; real geometry can."""
     result = run_multi_approach_scenario([VehicleSpec(NORTH), VehicleSpec(SOUTH)])
     assert not result.collided
@@ -92,7 +92,7 @@ def test_four_way_staggered_arrival_never_collides():
 
 
 class _RecklessNavigator(IntersectionNavigator):
-    """Never yields -- always claims right of way, regardless of who else is there."""
+    """Never yields: always claims right of way, regardless of who else is there."""
 
     def has_right_of_way(self, others):
         return True
@@ -115,7 +115,7 @@ def test_collision_check_actually_catches_a_non_compliant_vehicle():
 
 
 def test_turn_geometry_meets_curvature_limit_and_is_short_for_every_approach_and_direction():
-    """Every approach x {left, right} must produce a clean, direct Dubins connector -- not
+    """Every approach x {left, right} must produce a clean, direct Dubins connector, not
     the pathological ~5x-too-long path an under-sized turn_lead produced (KNOWN_BUGS.md entry 4)."""
     turning_radius = 6.0
     for approach in [NORTH, EAST, SOUTH, WEST]:
@@ -133,7 +133,7 @@ def test_turn_geometry_meets_curvature_limit_and_is_short_for_every_approach_and
 
 def test_left_turn_exits_heading_matches_the_straight_through_traffic_it_merges_with():
     """A left turn from NORTH ends up heading the same direction WEST's straight-through
-    traffic travels -- the real-driving convention turn_exit_heading documents."""
+    traffic travels: the real-driving convention turn_exit_heading documents."""
     exit_n, _ = build_turn_path(NORTH, "left", lane_offset=3.0, turning_radius=4.0)
     assert abs(wrap_angle(exit_n.heading - WEST.heading)) < 1e-6
     exit_s, _ = build_turn_path(SOUTH, "left", lane_offset=3.0, turning_radius=4.0)
@@ -148,7 +148,7 @@ def test_right_turn_exits_heading_is_opposite_the_left_turn_from_the_same_approa
 
 def test_left_turn_yields_to_oncoming_straight_traffic_despite_arriving_first():
     """A left-turner that reaches its stop line first still waits for oncoming straight
-    traffic -- regression for the circular-deadlock bug this rule introduced (KNOWN_BUGS.md entry 4)."""
+    traffic: regression for the circular-deadlock bug this rule introduced (KNOWN_BUGS.md entry 4)."""
     specs = [VehicleSpec(NORTH, start_distance=70.0, turn="left"), VehicleSpec(SOUTH, start_distance=130.0, turn="straight")]
     result = run_multi_approach_scenario(specs, max_steps=6000)
     assert not result.collided
@@ -182,7 +182,7 @@ def test_right_turn_does_not_defer_to_oncoming_traffic_via_the_left_turn_rule():
 
 def test_mixed_turn_random_sweep_never_collides():
     """Broad regression: random start distances and turns across all four approaches must
-    never produce a real collision -- this is what actually caught the two bugs above."""
+    never produce a real collision: this is what actually caught the two bugs above."""
     rng = np.random.default_rng(0)
     for _ in range(60):
         turns = rng.choice(["straight", "left", "right"], size=4)
@@ -199,7 +199,7 @@ def test_mixed_turn_random_sweep_never_collides():
 
 def test_left_turn_yield_can_gridlock_but_never_collides():
     """Known, accepted liveness limitation (KNOWN_BUGS.md entry 4): the unconditional
-    left-yields-to-oncoming rule can form a 3-vehicle wait cycle -- never unsafe, just not always live."""
+    left-yields-to-oncoming rule can form a 3-vehicle wait cycle: never unsafe, just not always live."""
     specs = [
         VehicleSpec(NORTH, start_distance=128.7, turn="straight"),
         VehicleSpec(EAST, start_distance=115.8, turn="right"),
@@ -225,7 +225,7 @@ def test_guard_rejects_turn_lead_too_large_for_start_distance():
 
 def test_clear_distance_for_a_turning_vehicle_is_past_the_conflict_box_not_just_the_curve():
     """Code-review finding: _clear_distance's turning branch checked only the curve's endpoint,
-    not conflict_half_width -- a turning vehicle could be marked "cleared" while still inside the box."""
+    not conflict_half_width: a turning vehicle could be marked "cleared" while still inside the box."""
     from core.intersection2d_harness import _build_route, _clear_distance, _pose_at
 
     conflict_half_width, clear_margin = 9.5, 3.0

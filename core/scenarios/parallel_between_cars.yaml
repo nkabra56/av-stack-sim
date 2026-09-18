@@ -1,5 +1,5 @@
 # Tight parallel-parking case: cars ahead of and behind the stall, needs a reverse-gear
-# cusp. Pure Pursuit is UNSAFE here (DESIGN.md section 7) -- see tests/test_simulation.py.
+# cusp. Pure Pursuit is UNSAFE here (DESIGN.md section 7): see tests/test_simulation.py.
 name: "Parallel: between two parked cars"
 spot: {x: 0.0, y: 0.0, theta: -1.5707963267948966, size: 2.6}
 start: {x: 1.8, y: 10.0, theta: -1.5707963267948966, wheelbase: 2.7}

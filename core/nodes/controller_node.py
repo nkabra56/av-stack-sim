@@ -1,5 +1,5 @@
 """Wraps the existing Controller (Pure Pursuit or MPC) unchanged, one control decision per
-tick. Also owns the speed governor (braking on close obstacles) -- see KNOWN_BUGS.md entries 2/3."""
+tick. Also owns the speed governor (braking on close obstacles): see KNOWN_BUGS.md entries 2/3."""
 
 import math
 
@@ -14,7 +14,7 @@ from core.vehicle import wrap_angle
 
 def _distance_to_polyline(x: float, y: float, path_xy: np.ndarray) -> float:
     """True perpendicular distance from (x, y) to the piecewise-linear path, not just to
-    its nearest waypoint -- avoids misclassifying on-plan driving as "not tracking"."""
+    its nearest waypoint: avoids misclassifying on-plan driving as "not tracking"."""
     if len(path_xy) < 2:
         return float(np.hypot(path_xy[:, 0] - x, path_xy[:, 1] - y).min())
     a, b = path_xy[:-1], path_xy[1:]
@@ -25,8 +25,8 @@ def _distance_to_polyline(x: float, y: float, path_xy: np.ndarray) -> float:
     closest = a + t[:, None] * ab
     return float(np.hypot(closest[:, 0] - x, closest[:, 1] - y).min())
 
-STALL_SPEED = 0.1  # m/s -- below this, the governor is treated as "essentially stopping" the vehicle
-STALL_TICKS = 15  # ~1.5s at dt=0.1 -- long enough to be a real stall, not ordinary governor tightening
+STALL_SPEED = 0.1  # m/s: below this, the governor is treated as "essentially stopping" the vehicle
+STALL_TICKS = 15  # ~1.5s at dt=0.1: long enough to be a real stall, not ordinary governor tightening
 
 
 class ControllerNode:
@@ -54,7 +54,7 @@ class ControllerNode:
         # None (default) disables the feature, always using stopping_buffer.
         self.tracked_stopping_buffer = tracked_stopping_buffer
         # Cross-track distance below which the vehicle counts as "accurately tracking".
-        # Deliberately tight (3cm) -- see KNOWN_BUGS.md entry 3 for the sweep behind this value.
+        # Deliberately tight (3cm): see KNOWN_BUGS.md entry 3 for the sweep behind this value.
         self.tracking_threshold = tracking_threshold
 
         self._pose_estimate: PoseEstimateMsg | None = None
@@ -85,7 +85,7 @@ class ControllerNode:
 
     def _safe_speed(self, forward: bool) -> float:
         """Safe speed toward `forward` (front beams) or not (rear beams), ignoring the
-        other side entirely -- classified by angle, not a hardcoded front/rear list."""
+        other side entirely: classified by angle, not a hardcoded front/rear list."""
         if not self._obstacle_ranges or not self._obstacle_ranges.readings:
             return float("inf")
         relevant = [
@@ -113,7 +113,7 @@ class ControllerNode:
             return
 
         if self._path is None:
-            # No plan to track yet -- PlannerNode hasn't run yet, or its last attempt raised.
+            # No plan to track yet: PlannerNode hasn't run yet, or its last attempt raised.
             # Counts as a stall too, so a boxed-in start pose still triggers a re-plan retry.
             self._note_stall(stalled=True)
             self.bus.publish("control_cmd", ControlCmdMsg(0.0, 0.0))

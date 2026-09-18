@@ -7,7 +7,7 @@ from scipy.optimize import minimize
 
 
 class IDMController:
-    """Intelligent Driver Model (Treiber, Hennecke & Helbing, 2000) -- literature-standard,
+    """Intelligent Driver Model (Treiber, Hennecke & Helbing, 2000): literature-standard,
     closed-form car-following law. Default parameters are from the original paper / SUMO."""
 
     def __init__(

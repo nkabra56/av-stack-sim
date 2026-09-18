@@ -1,5 +1,5 @@
 """Direct convergence unit coverage for the two path-tracking controllers, decoupled from
-a real planner -- test_simulation.py covers the full stack; this isolates the controller."""
+a real planner: test_simulation.py covers the full stack; this isolates the controller."""
 
 import numpy as np
 import pytest

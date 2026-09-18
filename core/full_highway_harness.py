@@ -1,6 +1,6 @@
 """Tick-based executor for the full closed-loop highway drive: H1 (ACC) controls speed,
 H3 (Stanley) controls steering, H2's EKF fuses both, all on one real Vehicle. Uses real
-NGSIM US-101 lane 2 data throughout -- see core/data/ngsim/ATTRIBUTION.md and DESIGN.md
+NGSIM US-101 lane 2 data throughout: see core/data/ngsim/ATTRIBUTION.md and DESIGN.md
 section 12."""
 
 from dataclasses import dataclass
@@ -42,13 +42,13 @@ class FullHighwaySimulationResult:
     ego_speed_estimate: np.ndarray  # fused (H2)
     ego_accel: np.ndarray
     ego_delta: np.ndarray
-    cross_track_error: np.ndarray  # true, signed -- same metric as lane_centering_validation.py
+    cross_track_error: np.ndarray  # true, signed, same metric as lane_centering_validation.py
     lead_position: np.ndarray
     lead_speed: np.ndarray
     gap: np.ndarray  # true bumper-to-bumper, meters (arc-length based)
     min_gap: float
     collided: bool  # true gap ever reached zero
-    # Phase B only (intersection_navigator given) -- None otherwise:
+    # Set only in Phase B (intersection_navigator given), None otherwise:
     states: list[IntersectionState] | None = None
     ego_stop_time: float | None = None
     ran_stop_sign: bool | None = None  # crossed the stop line without stopping (see intersection_harness.py)
@@ -96,7 +96,7 @@ class FullHighwayHarness:
         ego_start_s = lead_position[0] - lead_length - ego_initial_gap
         x0, y0, theta0 = pose_at_arc_length(ego_start_s, centerline, self.arc_length_table)
         # Offsetting straight in y approximates a lateral offset well on this centerline's
-        # gentle curvature -- same shortcut lane_centering_validation.py takes.
+        # gentle curvature: same shortcut lane_centering_validation.py takes.
         vehicle = Vehicle(
             x=x0, y=y0 + ego_initial_lateral_offset, theta=theta0, wheelbase=wheelbase, max_steer=max_steer
         )
@@ -114,7 +114,7 @@ class FullHighwayHarness:
             p0=np.diag([1.0, 1.0, 0.1, 0.5]),
             wheelbase=wheelbase,
             odom_v_std=0.0,  # unused: predict() is parking-only, this mode uses predict_with_speed_state
-            odom_delta_std=steering_odom_std,  # load-bearing here -- see ekf.py's predict_with_speed_state
+            odom_delta_std=steering_odom_std,  # load-bearing here: see ekf.py's predict_with_speed_state
             r_heading=compass_std**2,
             r_position=np.eye(2) * position_std**2,
             r_landmark=np.eye(2),  # unused (update_landmark never called in this mode)

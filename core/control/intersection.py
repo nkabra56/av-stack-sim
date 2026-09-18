@@ -1,5 +1,5 @@
 """Rule-based right-of-way navigator for a stop-sign intersection (H4). Reuses IDMController
-for longitudinal control -- the stop line is a stationary virtual lead vehicle. See DESIGN.md
+for longitudinal control: the stop line is a stationary virtual lead vehicle. See DESIGN.md
 section 12."""
 
 from dataclasses import dataclass
@@ -16,7 +16,7 @@ class IntersectionState(Enum):
 
 @dataclass
 class OtherVehicleStatus:
-    """What the ego can observe about one other vehicle -- known facts about the world,
+    """What the ego can observe about one other vehicle: known facts about the world,
     not the other vehicle's own internal state."""
 
     stopped: bool

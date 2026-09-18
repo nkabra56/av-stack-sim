@@ -11,7 +11,7 @@ from core.validation.ngsim_loader import load_lane_centerline
 from core.vehicle import Vehicle
 
 # Real per-vehicle lateral positioning std within NGSIM lane 2, before aggregation/smoothing
-# (see ATTRIBUTION.md) -- the plausibility bar below.
+# (see ATTRIBUTION.md): the plausibility bar below.
 REAL_LATERAL_STD_M = 0.46
 
 
@@ -30,7 +30,7 @@ def validate(
     initial_offset: float = 1.5,
     speed: float = 20.0,
     k: float = 0.5,
-    # Convergence distance scales with initial_offset -- 150m gives real margin across
+    # Convergence distance scales with initial_offset: 150m gives real margin across
     # the offsets this module is exercised with (measured directly, not assumed).
     settle_distance: float = 150.0,
     dt: float = 0.1,
@@ -46,7 +46,7 @@ def validate(
         vehicle.update(speed, delta, dt)
 
         # Measured at the front axle, matching StanleyController.control()'s own
-        # cross-track error -- reporting rear-axle CTE would validate a different quantity.
+        # cross-track error, reporting rear-axle CTE would validate a different quantity.
         front_x = vehicle.x + wheelbase * np.cos(vehicle.theta)
         front_y = vehicle.y + wheelbase * np.sin(vehicle.theta)
         nearest = int(np.argmin(np.hypot(path[:, 0] - front_x, path[:, 1] - front_y)))

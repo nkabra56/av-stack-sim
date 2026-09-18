@@ -7,7 +7,7 @@ validate `core/estimation/ekf.py` against a real driven trajectory (see
 
 Format is unmodified KITTI: each line is 12 numbers, a row-major 3x4 `[R|t]` pose matrix in
 the left-camera frame at that timestep, relative to frame 0 of the *original, full* sequence
-09 (not re-zeroed to this excerpt) — so absolute positions here are wherever frames 840-1139
+09 (not re-zeroed to this excerpt), so absolute positions here are wherever frames 840-1139
 happen to fall in that original trajectory, which is fine for this project's purposes (only
 relative motion and position differences are used).
 

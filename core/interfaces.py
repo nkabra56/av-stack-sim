@@ -19,7 +19,7 @@ class Planner(Protocol):
 
 
 class HasPose(Protocol):
-    """Anything with .x/.y/.theta -- a real Vehicle, or a PoseEstimateMsg, since
+    """Anything with .x/.y/.theta: a real Vehicle, or a PoseEstimateMsg, since
     controllers only ever act on the estimate, never ground truth."""
 
     x: float

@@ -1,4 +1,4 @@
-"""Unscented Kalman Filter for [x, y, theta] pose estimation -- an alternative to ekf.py's
+"""Unscented Kalman Filter for [x, y, theta] pose estimation: an alternative to ekf.py's
 EKF that avoids linearization via sigma points, to check whether the EKF's Jacobian
 linearization is actually a fine approximation. See core/validation/ukf_comparison.py."""
 
@@ -6,12 +6,12 @@ import numpy as np
 
 from core.vehicle import wrap_angle
 
-ANGLE_INDEX = 2  # theta's position in the [x, y, theta] state -- the one component
+ANGLE_INDEX = 2  # theta's position in the [x, y, theta] state: the one component
 # that needs circular (not linear) mean/difference handling throughout.
 
 
 def _circular_mean(angles: np.ndarray, weights: np.ndarray) -> float:
-    """Weighted mean of angles, correct across the -pi/pi wrap -- a naive average of
+    """Weighted mean of angles, correct across the -pi/pi wrap: a naive average of
     e.g. [3.1, -3.1] would give ~0 (wrong; the true mean is near pi/-pi)."""
     return float(np.arctan2(np.sum(weights * np.sin(angles)), np.sum(weights * np.cos(angles))))
 
@@ -66,7 +66,7 @@ class UnscentedKalmanFilter:
             dtheta = (v / self.wheelbase) * np.tan(delta) * dt
             propagated[i] = [x + v * np.cos(theta) * dt, y + v * np.sin(theta) * dt, wrap_angle(theta + dtheta)]
 
-        # Same input-Jacobian process noise ekf.py's predict() uses -- control-input noise
+        # Same input-Jacobian process noise ekf.py's predict() uses: control-input noise
         # isn't folded into the sigma points themselves (see this module's docstring).
         theta = self.x[2]
         cos_delta = np.cos(delta)

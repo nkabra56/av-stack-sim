@@ -76,7 +76,7 @@ def _clear_distance(spec: VehicleSpec, route: _Route, conflict_half_width: float
     if spec.turn == "straight":
         return spec.start_distance + conflict_half_width + clear_margin
     # A turning vehicle isn't "cleared" until past the curve's real endpoint, and that
-    # alone isn't always far enough past the box edge either -- take whichever is farther.
+    # alone isn't always far enough past the box edge either: take whichever is farther.
     turn_lead = TURN_LEAD_RATIO * spec.turning_radius
     extra_past_curve = max(clear_margin, conflict_half_width + clear_margin - turn_lead)
     return route.pre_curve_length + route.curve_length + extra_past_curve
@@ -114,7 +114,7 @@ def run_multi_approach_scenario(
     v_cruise: float = 15.0,
     dt: float = 0.1,
     max_steps: int = 3000,
-    navigators: list[IntersectionNavigator] | None = None,  # override, one per spec -- lets tests
+    navigators: list[IntersectionNavigator] | None = None,  # override, one per spec, lets tests
     # substitute a non-compliant navigator to verify the collision check is a real safety net.
 ) -> MultiIntersectionResult:
     # conflict_half_width/stop_margin interact with VehicleSpec.lane_offset and
@@ -127,10 +127,10 @@ def run_multi_approach_scenario(
             raise ValueError(
                 f"{spec.approach.name} turn={spec.turn}: turn_lead ({turn_lead:.1f}m, from "
                 f"turning_radius={spec.turning_radius}) exceeds conflict_half_width+stop_margin "
-                f"({conflict_half_width + stop_margin:.1f}m) -- a stopped vehicle would already be "
+                f"({conflict_half_width + stop_margin:.1f}m), a stopped vehicle would already be "
                 "mid-curve. Increase conflict_half_width/stop_margin or decrease turning_radius."
             )
-        # Also guard against pre_curve_length going negative via too-small start_distance --
+        # Also guard against pre_curve_length going negative via too-small start_distance:
         # the same mid-curve-at-t=0 bug, from a different cause.
         if turn_lead >= spec.start_distance - 1.0:
             raise ValueError(
@@ -173,7 +173,7 @@ def run_multi_approach_scenario(
                 if a == b:
                     continue
                 # A straight vehicle never yields to an opposing left-turner via arrival-order
-                # bookkeeping -- real right-of-way gives it unconditional precedence (paired with
+                # bookkeeping: real right-of-way gives it unconditional precedence (paired with
                 # the phantom rule below); this avoided a circular deadlock (KNOWN_BUGS.md entry 4).
                 opposing_left_turner = (
                     specs[a].turn == "straight"
@@ -190,7 +190,7 @@ def run_multi_approach_scenario(
                         )
                     )
                 # Left turns yield to oncoming straight traffic that hasn't cleared yet,
-                # regardless of arrival order -- modeled as a phantom "other" guaranteed to
+                # regardless of arrival order: modeled as a phantom "other" guaranteed to
                 # have arrived first. Gated on position, not navigator state (KNOWN_BUGS.md entry 4).
                 if (
                     specs[a].turn == "left"

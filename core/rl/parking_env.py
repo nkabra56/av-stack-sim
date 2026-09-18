@@ -1,5 +1,5 @@
 """Gymnasium environment wrapping the parking simulation for a learned end-to-end policy
-(raw sensing -> v/delta). Uses ground-truth state directly, no sensor noise -- see DESIGN.md
+(raw sensing -> v/delta). Uses ground-truth state directly, no sensor noise: see DESIGN.md
 section 10; core/validation/rl_comparison.py evaluates it against the real noisy baseline."""
 
 import gymnasium as gym
@@ -14,13 +14,13 @@ from core.vehicle import Vehicle, wrap_angle
 
 V_MAX = 1.5  # matches every controller's own v_max elsewhere in this project
 DELTA_MAX = 0.6  # matches Vehicle's own default max_steer
-GOAL_TOL = 0.4  # matches ParkingHarness's own default tol -- same "close enough to
+GOAL_TOL = 0.4  # matches ParkingHarness's own default tol: same "close enough to
 # call it parked" bar the baseline is judged against, for a fair comparison
 SENSOR_MAX_RANGE = 8.0
 
 
 class ParkingEnv(gym.Env):
-    metadata = {"render_modes": []}  # noqa: RUF012 -- standard Gymnasium API convention
+    metadata = {"render_modes": []}  # noqa: RUF012, standard Gymnasium API convention
 
     def __init__(self, scenario_name: str = "perpendicular_open", dt: float = 0.1, max_steps: int = 500):
         super().__init__()
@@ -29,7 +29,7 @@ class ParkingEnv(gym.Env):
         self.max_steps = max_steps
         self._ultrasonic = UltrasonicArray(angles=DEFAULT_SENSOR_ANGLES, max_range=SENSOR_MAX_RANGE)
 
-        # Normalized to [-1, 1]^2, not raw m/s/radians -- aids SB3 training stability.
+        # Normalized to [-1, 1]^2, not raw m/s/radians: aids SB3 training stability.
         # step() rescales to (V_MAX, DELTA_MAX) internally.
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
         n_beams = len(DEFAULT_SENSOR_ANGLES)
@@ -84,7 +84,7 @@ class ParkingEnv(gym.Env):
         # ParkingHarness.run()'s own success criterion (no heading term).
 
         # Shaped reward: dense progress term (dominant every step) plus sparse terminal
-        # bonuses/penalties -- dense alone would let the policy loiter without committing.
+        # bonuses/penalties: dense alone would let the policy loiter without committing.
         reward = (self._prev_dist - dist) - 0.01
         if collided:
             reward -= 50.0

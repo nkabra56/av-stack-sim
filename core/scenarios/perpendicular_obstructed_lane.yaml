@@ -1,5 +1,5 @@
 # A car sits in the drive aisle between start and the stall; M1's Dubins baseline can't
-# route around it. Resolved by Hybrid A* (M2) -- see IMPLEMENTATION.md section 3.
+# route around it. Resolved by Hybrid A* (M2): see IMPLEMENTATION.md section 3.
 name: "Perpendicular: obstructed lane"
 spot: {x: 0.0, y: 0.0, theta: 1.5707963267948966, size: 2.75}
 start: {x: -10.0, y: 0.0, theta: 0.0, wheelbase: 2.7}

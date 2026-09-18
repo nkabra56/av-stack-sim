@@ -148,7 +148,7 @@ def _obstacles_entity(environment: Environment) -> SceneEntity:
 
 
 def _vehicle_entity() -> SceneEntity:
-    """Static local geometry in the "vehicle" frame -- world-frame pose comes entirely
+    """Static local geometry in the "vehicle" frame: world-frame pose comes entirely
     from the per-tick FrameTransform, so this entity is logged unchanged every tick."""
     body = CubePrimitive(
         pose=_pose(0, 0, VEHICLE_BODY_HEIGHT / 2),
@@ -185,7 +185,7 @@ def render_foxglove(
     result: SimulationResult, environment: Environment, title: str = "", save_path: str = "out/demo.mcap", live: bool = False
 ) -> None:
     if len(result.true_history) == 0:
-        print(f"No trajectory to export for '{title}' — controller halted before the first step.")
+        print(f"No trajectory to export for '{title}': controller halted before the first step.")
         return
 
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)

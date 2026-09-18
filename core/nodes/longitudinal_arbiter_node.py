@@ -1,5 +1,5 @@
 """Composes two or more longitudinal-accel sources (H5 Phase B: ACC's and
-IntersectionNavigator's) via min() -- the more conservative demand wins each tick. Sound
+IntersectionNavigator's) via min(): the more conservative demand wins each tick. Sound
 since both controllers are memoryless functions of the current (position, speed). See DESIGN.md section 12's H5 entry."""
 
 from core.messaging.bus import Bus

@@ -14,12 +14,12 @@ from core.planning.dubins import _arc_points, _straight_points
 from core.planning.reeds_shepp import reeds_shepp_length, reeds_shepp_path
 from core.vehicle import wrap_angle
 
-STEER_SIGNS = (-1, 0, 1)  # right, straight, left -- curvature is always 0 or
+STEER_SIGNS = (-1, 0, 1)  # right, straight, left: curvature is always 0 or
 # exactly 1/turning_radius, so every primitive is drivable by construction.
 
 
 class PlanningFailure(RuntimeError):
-    """Raised when the search budget is exhausted with no path found -- never silently
+    """Raised when the search budget is exhausted with no path found: never silently
     returns a partial/best-effort path (DESIGN.md section 8's fail-loud precedent)."""
 
 

@@ -1,6 +1,6 @@
 """Dubins path planner: the shortest curvature-constrained path for a forward-only car
 between two poses, via the standard 4-family CSC (LSL/RSR/LSR/RSL) formulation. Doesn't
-avoid obstacles or reverse -- see Hybrid A*/Reeds-Shepp for that. DESIGN.md section 6."""
+avoid obstacles or reverse: see Hybrid A*/Reeds-Shepp for that. DESIGN.md section 6."""
 
 import numpy as np
 
@@ -99,7 +99,7 @@ def _walk_segments(
     start: Pose, seg_defs: list[tuple[str, float]], turning_radius: float, step: float
 ) -> np.ndarray:
     """Walk a (kind, magnitude) segment list from start, sampling at fixed arc-length
-    `step` -- shared by dubins.py's CSC composer and reeds_shepp.py's CCC composer."""
+    `step`: shared by dubins.py's CSC composer and reeds_shepp.py's CCC composer."""
     seg_lengths = np.array([mag if kind == "S" else turning_radius * mag for kind, mag in seg_defs])
     total = seg_lengths.sum()
     counts = np.maximum(2, np.round(seg_lengths / step).astype(int)) if total > 1e-9 else [2] * len(seg_defs)
@@ -131,7 +131,7 @@ class DubinsPlanner:
             raise RuntimeError(
                 f"No CSC Dubins candidate feasible for start={start}, goal={goal}, "
                 f"turning_radius={turning_radius} (start/goal turning circles are too "
-                f"close together -- the CCC-only regime this planner doesn't cover)."
+                f"close together: the CCC-only regime this planner doesn't cover)."
             )
         length, first, last, t, p, q = result
         step = max(length / npts, 1e-6)

@@ -31,7 +31,7 @@ class CompassMsg:
 
 @dataclass(frozen=True)
 class PositionFixMsg:
-    """Low-rate absolute (x, y) fix -- e.g. a garage RTLS/UWB-anchor system. Does not
+    """Low-rate absolute (x, y) fix, e.g. a garage RTLS/UWB-anchor system. Does not
     observe heading."""
 
     x: float
@@ -73,7 +73,7 @@ class PathMsg:
 @dataclass(frozen=True)
 class ReplanRequestMsg:
     """Published by ControllerNode when the speed governor has been binding long enough to
-    look like a stall -- see ControllerNode's docstring and PlannerNode's `_on_replan_request`."""
+    look like a stall: see ControllerNode's docstring and PlannerNode's `_on_replan_request`."""
 
 
 @dataclass(frozen=True)
@@ -113,7 +113,7 @@ class LongitudinalCmdMsg:
 
 
 # --- H2: fused ego speed. AccelOdometryMsg/SpeedometerMsg are noisy sensor readings;
-# EgoSpeedEstimateMsg is what AccControllerNode acts on -- ground truth stays elsewhere.
+# EgoSpeedEstimateMsg is what AccControllerNode acts on: ground truth stays elsewhere.
 
 
 @dataclass(frozen=True)

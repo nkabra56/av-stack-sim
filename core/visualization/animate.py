@@ -11,7 +11,7 @@ from core.environment import Environment
 from core.harness import SimulationResult
 
 VEHICLE_LENGTH = 4.5  # matches the ~2.7m wheelbase + overhangs used everywhere else (Vehicle,
-VEHICLE_WIDTH = 1.8  # scenario spot dimensions) -- not an arbitrary small rendering size
+VEHICLE_WIDTH = 1.8  # scenario spot dimensions), not an arbitrary small rendering size
 
 
 def _axis_bounds(result: SimulationResult, environment: Environment, pad: float = 1.0):
@@ -22,7 +22,7 @@ def _axis_bounds(result: SimulationResult, environment: Environment, pad: float 
         ys += list(result.true_history[:, 1])
     if result.path is not None and len(result.path):
         # Otherwise the planned path can render outside the visible axes when the vehicle
-        # stalls well short of the goal -- exactly the case meant to show that gap.
+        # stalls well short of the goal, exactly the case meant to show that gap.
         xs += list(result.path[:, 0])
         ys += list(result.path[:, 1])
     for obstacle in environment.obstacles:
@@ -44,7 +44,7 @@ def render_animation(
     result: SimulationResult, environment: Environment, title: str = "", save_path: str | None = None
 ) -> None:
     if len(result.true_history) == 0:
-        print(f"No trajectory to animate for '{title}' — controller halted before the first step.")
+        print(f"No trajectory to animate for '{title}': controller halted before the first step.")
         return
 
     fig = plt.figure(figsize=(11, 6))

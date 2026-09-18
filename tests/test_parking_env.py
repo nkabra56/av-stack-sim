@@ -1,4 +1,4 @@
-"""Fast, deterministic unit coverage for ParkingEnv's Gym contract and reward shape --
+"""Fast, deterministic unit coverage for ParkingEnv's Gym contract and reward shape:
 no training (see test_rl_training.py). Skipped if the `rl` optional dependency is unavailable."""
 
 import numpy as np
@@ -26,7 +26,7 @@ def test_reset_returns_an_observation_in_bounds():
 def test_driving_straight_toward_the_goal_gives_positive_reward():
     env = ParkingEnv(scenario_name="perpendicular_open")
     env.reset(seed=0)
-    # perpendicular_open's vehicle starts facing roughly toward the spot -- driving
+    # perpendicular_open's vehicle starts facing roughly toward the spot, driving
     # forward should reduce distance-to-goal, which the dense reward term rewards.
     _, reward, _, _, info = env.step(np.array([1.0, 0.0], dtype=np.float32))
     assert reward > 0
@@ -35,7 +35,7 @@ def test_driving_straight_toward_the_goal_gives_positive_reward():
 
 def test_driving_straight_into_a_flanking_obstacle_collides_and_penalizes_heavily():
     """Places the vehicle directly facing an obstacle at close range, rather than relying
-    on an action sequence happening to steer into one -- direct, not scenario-dependent."""
+    on an action sequence happening to steer into one: direct, not scenario-dependent."""
     env = ParkingEnv(scenario_name="perpendicular_flanked")
     env.reset(seed=0)
     obstacle = env._environment.obstacles[0]
@@ -50,7 +50,7 @@ def test_driving_straight_into_a_flanking_obstacle_collides_and_penalizes_heavil
 
 def test_action_is_clipped_to_the_declared_bounds():
     """An out-of-range action shouldn't silently drive the vehicle faster/harder than
-    the declared action_space allows -- clip, don't pass through."""
+    the declared action_space allows: clip, don't pass through."""
     env = ParkingEnv()
     env.reset(seed=0)
     x0 = env._vehicle.x

@@ -1,5 +1,5 @@
 """Reference adapter mapping bus.py's in-process pub/sub onto real ROS2 topics (DESIGN.md
-section 10). Not verified against a real ROS2 install -- see tests/test_ros2_bridge.py."""
+section 10). Not verified against a real ROS2 install: see tests/test_ros2_bridge.py."""
 
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -39,7 +39,7 @@ def pose_estimate_to_ros_kwargs(msg: PoseEstimateMsg) -> dict:
 
 def control_cmd_to_ros_kwargs(msg: ControlCmdMsg) -> dict:
     """-> geometry_msgs/Twist-shaped kwargs. `angular.z` carries steering *angle* (delta),
-    not yaw rate -- Twist has no steering-angle field; `ackermann_msgs/AckermannDrive` would be more correct."""
+    not yaw rate: Twist has no steering-angle field; `ackermann_msgs/AckermannDrive` would be more correct."""
     return {"linear": {"x": float(msg.v), "y": 0.0, "z": 0.0}, "angular": {"x": 0.0, "y": 0.0, "z": float(msg.delta)}}
 
 

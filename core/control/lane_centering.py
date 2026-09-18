@@ -1,4 +1,4 @@
-"""Stanley lane-centering controller -- the classical lateral-control law, same role
+"""Stanley lane-centering controller: the classical lateral-control law, same role
 Pure Pursuit (parking) and IDM (ACC) play elsewhere. See DESIGN.md section 12's H3 entry."""
 
 import numpy as np
@@ -15,7 +15,7 @@ class StanleyController:
 
     def control(self, pose: HasPose, path: np.ndarray, speed: float) -> float:
         # Cross-track error is measured at the front axle, not the rear-axle reference
-        # point -- steering corrects what's about to leave the lane.
+        # point, steering corrects what's about to leave the lane.
         front_x = pose.x + self.wheelbase * np.cos(pose.theta)
         front_y = pose.y + self.wheelbase * np.sin(pose.theta)
 

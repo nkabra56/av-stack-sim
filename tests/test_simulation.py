@@ -8,8 +8,8 @@ from core.planning.hybrid_astar import HybridAStarPlanner
 from core.scenario_loader import list_scenarios, load_scenario
 
 SEEDS = [1, 2, 3, 4, 5]
-MIN_SUCCESS_RATE = 4  # out of 5 -- noise can legitimately cause an occasional miss
-MAX_STEPS = 1000  # Hybrid A*'s avoidance routes are longer than M1's direct Dubins paths --
+MIN_SUCCESS_RATE = 4  # out of 5: noise can legitimately cause an occasional miss
+MAX_STEPS = 1000  # Hybrid A*'s avoidance routes are longer than M1's direct Dubins paths:
 # parallel_between_cars measured up to ~880 of 1000 steps to converge under MPC.
 
 CONTROLLERS = {
@@ -50,7 +50,7 @@ def test_reaches_the_spot_across_seeds(scenario_name, controller_name):
 @pytest.mark.parametrize("scenario_name,controller_name", _combinations(exclude=set()))
 @pytest.mark.parametrize("seed", SEEDS)
 def test_never_collides(scenario_name, controller_name, seed):
-    """Safety must hold on every seed for every combination -- including
+    """Safety must hold on every seed for every combination, including
     parallel_between_cars/pure_pursuit, which now fails safe instead of colliding (KNOWN_BUGS.md entry 2)."""
     result = _run(scenario_name, controller_name, seed)
     assert not result.collision

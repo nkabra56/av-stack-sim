@@ -80,7 +80,7 @@ def test_ccc_candidates_reconstruct_to_the_goal_pose():
 
         result = _solve_ccc(start, goal, turning_radius)
         if result is None:
-            continue  # start/goal turning circles farther apart than 4x turning_radius -- CCC not needed here
+            continue  # start/goal turning circles farther apart than 4x turning_radius: CCC not needed here
         _length, first, mid, last, t, p, q = result
         path = _ccc_points(start, first, mid, last, t, p, q, turning_radius, step=0.5)
         assert path[-1] == pytest.approx(goal, abs=1e-3)
@@ -90,7 +90,7 @@ def test_ccc_candidates_reconstruct_to_the_goal_pose():
 
 
 def test_ccc_is_infeasible_only_when_turning_circles_are_far_apart():
-    """The 4x-turning_radius regime KNOWN_BUGS.md entry 5 describes -- confirm both
+    """The 4x-turning_radius regime KNOWN_BUGS.md entry 5 describes: confirm both
     sides of that boundary behave as expected, not just that some CCC cases work."""
     close = _solve_ccc((0.0, 0.0, 0.0), (0.5, 0.0, np.pi), 1.0)  # d=0.5, well under 4x
     assert close is not None
@@ -131,7 +131,7 @@ def test_reeds_shepp_length_matches_the_actual_generated_path_length():
 
 def test_ccc_produces_meaningfully_shorter_paths_in_the_close_pose_regime():
     """Quantifies the actual value CCC adds (KNOWN_BUGS.md entry 5: a path-quality fix,
-    not a crash fix) -- if this drops near zero, the added complexity isn't worth it."""
+    not a crash fix), if this drops near zero, the added complexity isn't worth it."""
     rng = np.random.default_rng(17)
     shorter_count = 0
     trials = 300
@@ -158,7 +158,7 @@ def test_ccc_produces_meaningfully_shorter_paths_in_the_close_pose_regime():
 
 def test_hybrid_astar_does_not_use_ccc():
     """KNOWN_BUGS.md entry 5: CCC is deliberately NOT available to HybridAStarPlanner (more
-    curvature-aggressive, reopened KNOWN_BUGS.md entry 2) -- pins the source-level guard."""
+    curvature-aggressive, reopened KNOWN_BUGS.md entry 2): pins the source-level guard."""
     import inspect
 
     source = inspect.getsource(HybridAStarPlanner)

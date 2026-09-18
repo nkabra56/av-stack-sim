@@ -14,13 +14,13 @@ def build_arc_length_table(centerline: np.ndarray) -> np.ndarray:
 
 def project_to_arc_length(x: float, y: float, centerline: np.ndarray, arc_length: np.ndarray) -> float:
     """Nearest-waypoint projection of a point onto the centerline, as cumulative arc
-    length -- same nearest-index approach StanleyController.control() uses."""
+    length: same nearest-index approach StanleyController.control() uses."""
     idx = int(np.argmin(np.hypot(centerline[:, 0] - x, centerline[:, 1] - y)))
     return float(arc_length[idx])
 
 
 def pose_at_arc_length(s: float, centerline: np.ndarray, arc_length: np.ndarray) -> tuple[float, float, float]:
-    """Inverse of project_to_arc_length -- for scenario setup only (placing a vehicle's
+    """Inverse of project_to_arc_length: for scenario setup only (placing a vehicle's
     initial x/y/theta at a desired distance along the road)."""
     idx = int(np.argmin(np.abs(arc_length - s)))
     x, y, theta = centerline[idx]

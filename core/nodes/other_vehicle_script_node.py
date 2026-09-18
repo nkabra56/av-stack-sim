@@ -1,4 +1,4 @@
-"""Publishes a scripted other-vehicle's status over the Bus each tick (H5 Phase B) -- the
+"""Publishes a scripted other-vehicle's status over the Bus each tick (H5 Phase B): the
 thin adapter that lets H4's existing OtherVehicleScript drive IntersectionControllerNode."""
 
 from core.intersection_harness import OtherVehicleScript

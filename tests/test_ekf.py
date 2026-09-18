@@ -19,7 +19,7 @@ def _ekf(x0=(0.0, 0.0, 0.0), p0_scale=0.05, odom_v_std=0.03, odom_delta_std=0.01
 
 def test_predict_only_matches_closed_form_arc():
     """With zero odometry noise, the predicted mean should exactly match the closed-form
-    bicycle-model arc -- same check as test_vehicle's turning-radius test."""
+    bicycle-model arc: same check as test_vehicle's turning-radius test."""
     wheelbase = 2.7
     delta = 0.3
     v = 1.0
@@ -73,7 +73,7 @@ def test_predict_grows_covariance():
 
 def test_update_landmark_on_top_of_the_landmark_does_not_produce_nan():
     """Code-review finding: the measurement Jacobian divides by range_pred and q, unguarded
-    -- landing exactly on a landmark used to blow up toward Inf/NaN with no recovery."""
+, landing exactly on a landmark used to blow up toward Inf/NaN with no recovery."""
     ekf = _ekf()
     ekf.x[:2] = [5.0, 1.0]
     ekf.update_landmark(0.0, 0.0, (5.0, 1.0))  # estimate sits exactly on the landmark
@@ -143,7 +143,7 @@ def test_3state_ekf_behavior_is_unchanged_by_the_4state_extension():
 
 def test_predict_with_speed_state_matches_closed_form_constant_acceleration():
     """v update (v += accel*dt) is exact for constant acceleration. x update uses this
-    step's already-updated speed, a right-Riemann-sum approximation that overshoots -- not a bug."""
+    step's already-updated speed, a right-Riemann-sum approximation that overshoots, not a bug."""
     dt = 0.1
     accel = 2.0
     ekf = _speed_ekf(x0=(0.0, 0.0, 0.0, 10.0), accel_std=0.0)

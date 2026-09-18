@@ -126,7 +126,7 @@ def validate_tight_turn_stress(
     dt: float = 0.1,
     n_steps: int = 400,
 ) -> ComparisonResult:
-    """Synthetic full-circle drive at the vehicle's own tightest turning radius -- exact
+    """Synthetic full-circle drive at the vehicle's own tightest turning radius: exact
     closed-form ground truth, isolating linearization error from KITTI's residual noise."""
     vehicle = Vehicle(wheelbase=2.7, max_steer=0.6)
     delta = vehicle.max_steer

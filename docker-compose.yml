@@ -1,4 +1,4 @@
-# Convenience wrappers around the two Dockerfile targets -- see Dockerfile's own comments.
+# Convenience wrappers around the two Dockerfile targets: see Dockerfile's own comments.
 # `docker compose run --rm <service> ...` appends args, same as `docker run <image> ...`.
 services:
   test:
@@ -11,7 +11,7 @@ services:
     build:
       context: .
       target: base
-    # Output (e.g. --save/--plot files) lands in ./out on the host -- nothing
+    # Output (e.g. --save/--plot files) lands in ./out on the host, nothing
     # written elsewhere in the container persists past the run.
     volumes:
       - ./out:/app/out

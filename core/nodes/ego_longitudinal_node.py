@@ -1,4 +1,4 @@
-"""Owns the ego vehicle's longitudinal state as a simple 1D point-mass -- H1 (ACC) is
+"""Owns the ego vehicle's longitudinal state as a simple 1D point-mass: H1 (ACC) is
 straight-line only; the full 2D Vehicle comes back in H3. See DESIGN.md's ACC section."""
 
 import numpy as np

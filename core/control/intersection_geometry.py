@@ -1,5 +1,5 @@
 """Real 2D geometry for a 4-way intersection: perpendicular approaches, a real conflict-zone
-box, and heading-based right-of-way -- `control/intersection.py`'s single-conflict-point
+box, and heading-based right-of-way: `control/intersection.py`'s single-conflict-point
 model can't represent this. See KNOWN_BUGS.md entry 4 / DESIGN.md section 12."""
 
 import math
@@ -13,7 +13,7 @@ from core.planning.dubins import DubinsPlanner
 Turn = Literal["straight", "left", "right"]
 
 HIGHWAY_VEHICLE_RADIUS = 2.5  # bounding-circle radius for a real car's footprint (~4.5x2m).
-# Deliberately not named VEHICLE_RADIUS -- that's environment.py's parking-scale (1.0m) constant.
+# Deliberately not named VEHICLE_RADIUS: that's environment.py's parking-scale (1.0m) constant.
 
 
 def wrap_angle(theta: float) -> float:
@@ -25,7 +25,7 @@ class Approach:
     """One lane feeding the intersection: travels in a straight line along `heading`, offset
     from the road centerline by `lane_offset` to its own right (right-hand traffic)."""
 
-    name: str  # e.g. "N" for "coming from North" (heading south) -- descriptive only
+    name: str  # e.g. "N" for "coming from North" (heading south): descriptive only
     heading: float  # radians, direction of travel; core.vehicle's convention (0=+x east)
 
     def position(self, longitudinal: float, lane_offset: float, center: tuple[float, float] = (0.0, 0.0)) -> tuple[float, float]:
@@ -52,14 +52,14 @@ def is_to_the_right(self_heading: float, other_heading: float, tol: float = 1e-3
 
 
 def in_conflict_zone(x: float, y: float, half_width: float, center: tuple[float, float] = (0.0, 0.0)) -> bool:
-    """The conflict zone two perpendicular roads share, as a square -- a single shared
+    """The conflict zone two perpendicular roads share, as a square: a single shared
     point (H4's original model) is this square shrunk to zero width."""
     cx, cy = center
     return abs(x - cx) <= half_width and abs(y - cy) <= half_width
 
 
 def is_opposite(heading_a: float, heading_b: float, tol: float = 1e-3) -> bool:
-    """True if two approaches directly face each other (e.g. NORTH/SOUTH) -- the pairing
+    """True if two approaches directly face each other (e.g. NORTH/SOUTH): the pairing
     left-turns yield to while crossing oncoming traffic (KNOWN_BUGS.md entry 4)."""
     return abs(wrap_angle(heading_b - heading_a - math.pi)) < tol
 
@@ -75,7 +75,7 @@ def turn_exit_heading(entry_heading: float, turn: Turn) -> float:
     if turn == "right":
         return wrap_angle(entry_heading - math.pi / 2)
     # A typo used to silently fall through to the right-turn branch instead of failing
-    # loudly -- caught in code review, not by any test.
+    # loudly: caught in code review, not by any test.
     raise ValueError(f"turn must be 'straight', 'left', or 'right', got {turn!r}")
 
 

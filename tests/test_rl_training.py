@@ -1,5 +1,5 @@
 """Smoke test for the training pipeline: confirms PPO can train on ParkingEnv end to end
-without crashing. Deliberately not a convergence test -- see test_rl_comparison.py for real numbers."""
+without crashing. Deliberately not a convergence test: see test_rl_comparison.py for real numbers."""
 
 import pytest
 

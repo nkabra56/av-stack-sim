@@ -10,7 +10,7 @@ def test_excerpt_data_is_present():
 
 def test_ekf_beats_dead_reckoning_on_real_kitti_data():
     """The core claim: fusing periodic corrections against a real driven trajectory
-    reduces error vs. odometry alone. No arbitrary threshold -- strict improvement over dead reckoning."""
+    reduces error vs. odometry alone. No arbitrary threshold: strict improvement over dead reckoning."""
     sequence = load_kitti_poses(DEFAULT_POSES_PATH)
     result = validate(sequence, seed=0)
     assert result.ekf_rmse < result.dr_rmse

@@ -56,7 +56,7 @@ class SensorNode:
 
     def _publish_or_defer(self, topic: str, msg: object) -> None:
         if self.dropout_prob > 0.0 and self.rng.random() < self.dropout_prob:
-            return  # never arrives -- subscribers keep acting on their last-received value
+            return  # never arrives: subscribers keep acting on their last-received value
         if self.latency_ticks <= 0:
             self.bus.publish(topic, msg)
         else:

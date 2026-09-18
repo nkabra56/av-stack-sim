@@ -5,7 +5,7 @@ FROM python:3.12-slim AS base
 
 WORKDIR /app
 
-# matplotlib needs a headless backend -- Agg (raster, file-output only). Scripts already
+# matplotlib needs a headless backend: Agg (raster, file-output only). Scripts already
 # support --save/--plot for file output; see README.md's Quickstart.
 ENV MPLBACKEND=Agg \
     PYTHONUNBUFFERED=1 \

@@ -82,7 +82,7 @@ class MPCController:
             options={"maxiter": self.maxiter, "ftol": 1e-4},
         )
         # SLSQP's bounds are structurally enforced even on non-convergence, but an
-        # unconverged solve can still be poor -- fall back to last tick's warm-started plan.
+        # unconverged solve can still be poor: fall back to last tick's warm-started plan.
         u = result.x if result.success else u0
 
         shifted = np.roll(u, -2)

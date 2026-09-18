@@ -13,7 +13,7 @@ from core.sensors import UltrasonicArray
 
 def _sensor_node(bus, rng, **kwargs) -> SensorNode:
     ultrasonic = UltrasonicArray(angles=[0.0], max_range=8.0)
-    environment = Environment(Spot(100.0, 100.0, 0.0), obstacles=[])  # far away -- no landmarks in range
+    environment = Environment(Spot(100.0, 100.0, 0.0), obstacles=[])  # far away: no landmarks in range
     node = SensorNode(bus, ultrasonic, environment, rng, position_fix_period=1, **kwargs)
     bus.publish("true_state", TrueStateMsg(x=0.0, y=0.0, theta=0.0, v=0.0, delta=0.0))
     return node
@@ -46,7 +46,7 @@ def test_dropout_prob_one_never_delivers_anything():
 
 def test_dropout_is_probabilistic_not_all_or_nothing():
     """A middling dropout_prob should deliver *some* but not *all* compass readings over
-    enough ticks -- confirms the RNG draw gates delivery per-message, not per-run."""
+    enough ticks: confirms the RNG draw gates delivery per-message, not per-run."""
     bus = Bus()
     rng = np.random.default_rng(0)
     node = _sensor_node(bus, rng, dropout_prob=0.5)
@@ -74,7 +74,7 @@ def test_latency_delays_delivery_by_exactly_latency_ticks():
 
 def test_latency_preserves_the_original_measurement_not_a_stale_recompute():
     """The delayed message should carry the value computed when the reading was taken,
-    not re-derived at release time -- modeling a late-arriving packet, not a teleporting one."""
+    not re-derived at release time, modeling a late-arriving packet, not a teleporting one."""
     bus = Bus()
     rng = np.random.default_rng(0)
     ultrasonic = UltrasonicArray(angles=[0.0], max_range=8.0)
