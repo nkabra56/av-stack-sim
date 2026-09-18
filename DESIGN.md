@@ -434,6 +434,14 @@ selectable per scenario via `demo.py --controller mpc`.
   reported by the harness, so the reported figure was conservative there. The viewer draws and reports
   the geometric gap. Whether the quantization can hide a true overlap in other configurations has not
   been checked.
+- The signalized-intersection scene (`core/signalized_intersection.py`) is a fixed-time plan with straight-through
+  IDM cars only: no turns, pedestrians, actuated timing, or vehicles blocking the box. A car brakes for a yellow only
+  if it cannot clear the line first and can stop at 4.5 m/s². It is a demonstration of queueing and safety, not a
+  traffic-engineering model.
+- Background traffic in the highway scenes (`core/background_traffic.py`) replays the recorded lead car's speed in the
+  neighboring lanes with IDM followers behind it. Those cars never change lanes and never react to the ego.
+- Scenery (signs, signals, crosswalks, sidewalks, buildings, trees, guardrails) is generated for display only and is
+  deterministic, but it is not from any recording. Only the vehicle paths, lane geometry and recorded speeds are.
 
 ## 10. Future extensions
 

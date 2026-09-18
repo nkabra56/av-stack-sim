@@ -1,7 +1,7 @@
 # AV Stack Sim
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-282%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-299%20passing-brightgreen)](tests/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
 A from-scratch autonomous-driving stack in Python: state estimation, motion planning, and control
@@ -25,31 +25,37 @@ estimate with its 1σ ellipse. The fan is the ultrasonic sensor array.*
 
 ## Interactive 3D viewer
 
-A browser replay of twelve runs. Three are parking. Five are highway and intersection driving:
-car following behind real recorded NGSIM traffic (MPC and IDM), a stop sign, a four-way stop, and
-a left turn. Four use real data: two KITTI drives, our controller beside a recorded human follower,
-and lane centering on a real lane. Switch between follow, overview, and top-down cameras, scrub or
-speed up playback, and toggle the planned path, trails, sensor rays, EKF uncertainty, and the
-simulator's collision circle.
+A browser replay of fourteen runs on roads that look like roads: lane markings, guardrails,
+crosswalks, sidewalks, STOP signs, working traffic signals, street lights, trees, buildings, and
+other cars with brake lights. Three runs are parking. Seven are highway and intersection driving:
+car following behind recorded NGSIM traffic (MPC and IDM) with cars in the neighboring lanes, a stop
+sign, a four-way stop, a T intersection, a left turn, and a fixed-time signalized intersection. Four
+use real data: two KITTI drives, our controller beside a recorded human follower, and lane centering
+on a real lane. Each scene lists what to watch and what is real versus simulated. Cars carry name
+tags, a colored bar shows the following gap, and the panel shows live speed, gap, time gap,
+acceleration and signal state. Switch between follow, overview, and top-down cameras, scrub or speed
+up playback, and toggle the planned path, trails, sensor rays, EKF uncertainty, the collision
+circle, and the scenery.
 
-| Parking: reverse cusp between two cars | Four-way stop with staggered arrivals |
+| Parking: reverse cusp between two cars | Signalized intersection with queues |
 |---|---|
-| ![3D viewer, parallel parking](docs/media/viewer_parking.png) | ![3D viewer, four-way stop](docs/media/viewer_intersection.png) |
+| ![3D viewer, parallel parking](docs/media/viewer_parking.png) | ![3D viewer, signalized intersection](docs/media/viewer_signal.png) |
 
-| Real KITTI drive: EKF vs. dead reckoning | Our controller beside a recorded human follower |
+| Highway following with traffic in the other lanes | Real KITTI drive: EKF vs. dead reckoning |
 |---|---|
-| ![3D viewer, KITTI drive](docs/media/viewer_kitti.png) | ![3D viewer, recorded follower](docs/media/viewer_follower.png) |
+| ![3D viewer, highway](docs/media/viewer_highway.png) | ![3D viewer, KITTI drive](docs/media/viewer_kitti.png) |
 
 ```bash
 python -m core.visualization.web_export                 # re-run the scenarios, write docs/viewer/scenes.js
 python -m http.server 8000 --directory docs/viewer      # then open http://localhost:8000
 ```
 
-The page loads three.js from a CDN, so it needs a network connection. Three fidelity notes: KITTI
-supplies the trajectory while its sensor noise is simulated; the parking collision test is a 1.0 m
-circle, smaller than the drawn 4.5 m car, so close passes can look like overlaps; and the highway
-harness locates the ego by nearest waypoint (2 m apart), so its reported gap can differ from the
-drawn one by up to 1 m, and the viewer shows the drawn geometry (see
+The page loads three.js from a CDN, so it needs a network connection. Fidelity notes: KITTI supplies the
+trajectory while its sensor noise is simulated; the parking collision test is a 1.0 m circle, smaller
+than the drawn 4.5 m car; the highway harness locates the ego by nearest waypoint (2 m apart), so
+its reported gap can differ from the drawn one by up to 1 m, and the viewer shows the drawn
+geometry; cars in the neighboring lanes are simulated background traffic that never interacts with
+the ego; and scenery, signs and signals are illustrative and drawn oversized at intersections (see
 [DESIGN.md](DESIGN.md#9-known-limitations--assumptions)).
 
 ## Architecture
@@ -87,7 +93,7 @@ Tick order and the full diagram: [DESIGN.md](DESIGN.md#2-system-architecture).
 - **An RL baseline.** A PPO policy trained in a Gymnasium environment parks without collisions
   across 5 seeds on the open and flanked lots, and is compared with the planner and controller
   stack on success, collisions, and steps ([provenance](core/data/rl/PROVENANCE.md)).
-- **Tested and modular.** 286 tests (282 pass out of the box, 4 need the `rl` or `viz` extras),
+- **Tested and modular.** 303 tests (299 pass out of the box, 4 need the `rl` or `viz` extras),
   ruff-clean, with planners, controllers, and nodes swappable behind common interfaces.
 
 Reasoning and tradeoffs: [DESIGN.md](DESIGN.md). Module breakdown, milestones, and testing:
@@ -115,7 +121,7 @@ validation is simulated on top of it.
 
 ```bash
 pip install -e ".[dev]"
-pytest                                                          # 282 pass, 4 more need `rl`/`viz`
+pytest                                                          # 299 pass, 4 more need `rl`/`viz`
 ruff check core tests                                           # lint
 
 # Parking
@@ -167,11 +173,12 @@ core/
   control/             # pure_pursuit.py, mpc.py, acc.py (IDM + MPC-ACC), lane_centering.py (Stanley),
                        # intersection.py, intersection_geometry.py
   nodes/               # one node per role, for parking and highway
-  harness.py, highway_harness.py, intersection_harness.py,
-  intersection2d_harness.py, full_highway_harness.py   # tick-based executors
+  harness.py, highway_harness.py, intersection_harness.py, intersection2d_harness.py,
+  full_highway_harness.py, signalized_intersection.py   # tick-based executors
+  background_traffic.py   # IDM cars in the lanes beside the ego (viewer scenes)
   rl/                  # ParkingEnv (Gymnasium) and PPO training
   validation/          # KITTI and NGSIM loaders and validations, RL and UKF comparisons
-  visualization/       # animate.py (Matplotlib), foxglove_export.py, web_export.py (3D viewer data)
+  visualization/       # animate.py (Matplotlib), foxglove_export.py, web_export.py and scenery.py (3D viewer)
   data/                # committed KITTI and NGSIM excerpts, trained RL policies
 docs/
   viewer/              # index.html (three.js viewer) and generated scenes.js
