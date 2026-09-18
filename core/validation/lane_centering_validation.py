@@ -24,6 +24,8 @@ class LaneCenteringResult:
     cross_track_error: np.ndarray  # (N,) signed, meters
     max_cte_after_settling: float
     rms_cte: float
+    vehicle_theta: np.ndarray | None = None  # (N,) heading after each step
+    delta: np.ndarray | None = None  # (N,) steering command applied at each step
 
 
 def validate(
@@ -40,7 +42,7 @@ def validate(
     vehicle = Vehicle(x=path[0, 0], y=path[0, 1] + initial_offset, theta=path[0, 2], wheelbase=wheelbase)
     controller = StanleyController(wheelbase=wheelbase, k=k)
 
-    xs, ys, distances, ctes = [], [], [], []
+    xs, ys, thetas, deltas, distances, ctes = [], [], [], [], [], []
     while vehicle.x < path[-1, 0]:
         delta = controller.control(vehicle, path, speed)
         vehicle.update(speed, delta, dt)
@@ -54,6 +56,8 @@ def validate(
 
         xs.append(vehicle.x)
         ys.append(vehicle.y)
+        thetas.append(vehicle.theta)
+        deltas.append(delta)
         distances.append(vehicle.x - path[0, 0])
         ctes.append(cte)
 
@@ -69,6 +73,8 @@ def validate(
         cross_track_error=cte,
         max_cte_after_settling=float(np.max(np.abs(settled))) if len(settled) else float("nan"),
         rms_cte=float(np.sqrt(np.mean(cte**2))),
+        vehicle_theta=np.array(thetas),
+        delta=np.array(deltas),
     )
 
 

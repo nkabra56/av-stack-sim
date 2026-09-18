@@ -68,6 +68,7 @@
   .stat .k { color: var(--muted); font-size: 12px; flex: 1; }
   .stat .v { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; }
   .stat .u { color: var(--muted); font-size: 11px; width: 26px; }
+  .stat .v.t { font-size: 14px; text-transform: capitalize; }
   #gear { display: none; margin-top: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--warn);
     border: 1px solid var(--warn); border-radius: 6px; padding: 1px 8px; width: max-content; }
   #gear.on { display: block; }
@@ -340,6 +341,9 @@ async function main() {
     return [Math.min(...xs) - pad, Math.max(...xs) + pad, Math.min(...ys) - pad, Math.max(...ys) + pad];
   }
 
+  const viewBounds = (s) => s.view_bounds || bounds(s);
+  const isStaticKind = (s) => s.kind === "parking" || s.kind === "intersection";
+
   function disposeTree(o) {
     o.traverse((c) => {
       if (c.geometry) c.geometry.dispose();
@@ -384,18 +388,31 @@ async function main() {
       ring.position.set(o.x, o.y, 0.03);
       root.add(cyl, ring);
     }
+    const decor = s.decor || {};
+    for (const st of decor.strips || []) root.add(ribbon([[st.x1, st.y1], [st.x2, st.y2]], st.width, st.color, 1, 0.02));
+    for (const bx of decor.boxes || []) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(bx.w, bx.h),
+        new THREE.MeshBasicMaterial({ color: bx.color, transparent: bx.opacity < 1, opacity: bx.opacity, depthWrite: false, ...decal }));
+      m.position.set(bx.x, bx.y, 0.024); m.rotation.z = bx.th;
+      root.add(m);
+    }
+    for (const br of decor.bars || []) root.add(bar(br.x1, br.y1, br.x2, br.y2, br.w, br.color, br.opacity ?? 1, 0.03));
     if (s.road) {
-      const cl = s.road.centerline, w = s.road.width;
-      root.add(ribbon(cl, w, 0x2a313c, 1, 0.02));
-      for (const side of [-1, 1]) root.add(ribbon(offsetLine(cl, side * (w / 2 - 0.15)), 0.15, 0xdfe6f2, 0.85, 0.03));
+      const cl = s.road.centerline, w = s.road.width, offs = s.road.offsets || [0];
+      for (const o of offs) {
+        const lane = o ? offsetLine(cl, o) : cl;
+        root.add(ribbon(lane, w, 0x2a313c, 1, 0.02));
+        for (const side of [-1, 1]) root.add(ribbon(offsetLine(lane, side * (w / 2 - 0.15)), 0.15, 0xdfe6f2, 0.85, 0.03));
+      }
       const postGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.1, 8);
       const postMat = new THREE.MeshStandardMaterial({ color: 0xd6dbe4, emissive: 0x6b5410, roughness: 0.6 });
+      const leftPosts = offsetLine(cl, Math.max(...offs) + w / 2 + 1.1), rightPosts = offsetLine(cl, Math.min(...offs) - w / 2 - 1.1);
       let acc = 0;
       for (let i = 1; i < cl.length; i++) {
         acc += Math.hypot(cl[i][0] - cl[i - 1][0], cl[i][1] - cl[i - 1][1]);
         if (acc < 25) continue;
         acc = 0;
-        for (const p of [offsetLine(cl, w / 2 + 1.1)[i], offsetLine(cl, -(w / 2 + 1.1))[i]]) {
+        for (const p of [leftPosts[i], rightPosts[i]]) {
           const post = new THREE.Mesh(postGeo, postMat);
           post.rotation.x = Math.PI / 2; post.position.set(p[0], p[1], 0.55); post.castShadow = true;
           root.add(post);
@@ -469,12 +486,20 @@ async function main() {
       root.add(layers.unc);
     }
 
-    cur = { scene: s, root, bounds: b, layers, trails, vehicles, follow: new THREE.Vector3() };
+    const zones = (s.zones || []).map((z) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(z.w, z.h),
+        new THREE.MeshBasicMaterial({ color: z.color, transparent: true, opacity: z.opacity, depthWrite: false, ...decal }));
+      m.position.set(z.x, z.y, 0.028); m.rotation.z = z.th; m.visible = false;
+      root.add(m);
+      return { mesh: m, t0: z.t0, t1: z.t1 };
+    });
+
+    cur = { scene: s, root, bounds: b, layers, trails, vehicles, zones, focus: s.focus || 0, follow: new THREE.Vector3() };
     state.t = 0;
     $("#timeline").max = String(s.n - 1);
     buildPanels(s);
     apply();
-    setView(s.kind === "parking" ? "overview" : "follow");
+    setView(s.default_view || (isStaticKind(s) ? "overview" : "follow"));
   }
 
   // ---------- per-frame application ----------
@@ -482,7 +507,7 @@ async function main() {
 
   function apply() {
     const s = cur.scene, n = s.n;
-    const t = clamp(state.t, 0, n - 1), i = Math.min(Math.floor(t), n - 2), f = n > 1 ? t - i : 0;
+    const t = Number.isFinite(state.t) ? clamp(state.t, 0, n - 1) : 0, i = Math.min(Math.floor(t), n - 2), f = n > 1 ? t - i : 0;
     const j = Math.min(i + 1, n - 1);
 
     for (const v of cur.vehicles) {
@@ -534,8 +559,8 @@ async function main() {
     }
 
     // Camera follow: translate camera and orbit target together so the user's offset is kept.
-    const lead = cur.vehicles[0].model.position;
-    if (state.view !== "overview" && !(state.view === "top" && s.kind === "parking")) {
+    const lead = cur.vehicles[cur.focus].model.position;
+    if (state.view !== "overview" && !(state.view === "top" && isStaticKind(s))) {
       const d = lead.clone().sub(cur.follow);
       camera.position.add(d); controls.target.add(d);
     }
@@ -543,7 +568,9 @@ async function main() {
     if (cur.layers.collision) cur.layers.collision.position.set(lead.x, lead.y, 0.025);
     sun.position.set(lead.x + 28, lead.y - 18, 55); sun.target.position.set(lead.x, lead.y, 0);
 
+    for (const z of cur.zones) z.mesh.visible = t * s.dt >= z.t0 && t * s.dt < z.t1;
     for (const h of cur.hudRows) {
+      if (h.def.labels) { h.el.textContent = h.def.labels[s.signals[h.def.key][Math.round(t)]] || ""; continue; }
       const val = sample(s.signals[h.def.key], i, f) * (h.def.scale || 1);
       h.el.textContent = val.toFixed(h.def.fmt);
     }
@@ -555,11 +582,12 @@ async function main() {
   }
 
   // ---------- camera views ----------
-  const FOLLOW = { parking: [15, 30], highway: [13, 24], kitti: [34, 32] };
+  const FOLLOW = { parking: [15, 30], highway: [13, 24], kitti: [34, 32], lane: [13, 24], intersection: [30, 38] };
   function setView(mode) {
+    if (!["follow", "overview", "top"].includes(mode)) return;
     state.view = mode;
     document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === mode)));
-    const s = cur.scene, b = cur.bounds, lead = cur.vehicles[0].model;
+    const s = cur.scene, b = viewBounds(s), lead = cur.vehicles[cur.focus].model;
     const cx = (b[0] + b[1]) / 2, cy = (b[2] + b[3]) / 2, span = Math.max(b[1] - b[0], b[3] - b[2]);
     const fit = (span / 2) / Math.tan((camera.fov * Math.PI) / 360) * 1.15;
     const place = (target, dist, elev, azim) => {
@@ -573,14 +601,14 @@ async function main() {
     };
     const heading = lead.rotation.z;
     if (mode === "overview") {
-      place(new THREE.Vector3(cx, cy, 0), Math.min(fit, 1800), s.kind === "parking" ? 52 : 60, -Math.PI / 2 - 0.5);
+      place(new THREE.Vector3(cx, cy, 0), Math.min(fit, 1800), isStaticKind(s) ? 55 : 60, -Math.PI / 2 - 0.5);
     } else if (mode === "follow") {
-      const [d, el] = FOLLOW[s.kind];
+      const [d, el] = FOLLOW[s.kind] || FOLLOW.highway;
       place(new THREE.Vector3(lead.position.x, lead.position.y, 0.6), d * Math.max(1, 1.1 / camera.aspect), el, heading + Math.PI);
-    } else if (s.kind === "parking") {
+    } else if (isStaticKind(s)) {
       place(new THREE.Vector3(cx, cy, 0), Math.min(fit, 1800), 89, -Math.PI / 2);
     } else {
-      place(new THREE.Vector3(lead.position.x, lead.position.y, 0), FOLLOW[s.kind][0] * 3.2, 89, heading + Math.PI);
+      place(new THREE.Vector3(lead.position.x, lead.position.y, 0), (FOLLOW[s.kind] || FOLLOW.highway)[0] * 3.2, 89, heading + Math.PI);
     }
     cur.follow.copy(lead.position);
     controls.update();
@@ -603,11 +631,12 @@ async function main() {
     s.vehicles.forEach((v) => item(v.color, v.label || LABELS[v.track] || v.track, v.style === "ghost"));
     if (s.path) item(s.kind === "kitti" ? "#64748b" : "#22d3ee", s.kind === "kitti" ? "Route (ground truth)" : "Planned path");
     if (s.collision_radius) item("#8dbaff", `Collision circle (${s.collision_radius} m radius)`);
+    (s.zones || []).forEach((z) => item(z.color, z.label));
 
     const hud = $("#hud"); hud.innerHTML = "";
     const rows = s.hud.map((def) => {
       const row = document.createElement("div"); row.className = "stat";
-      row.innerHTML = `<span class="k">${def.label}</span><span class="v">0</span><span class="u">${def.unit}</span>`;
+      row.innerHTML = `<span class="k">${def.label}</span><span class="v${def.labels ? " t" : ""}">0</span><span class="u">${def.unit || ""}</span>`;
       hud.append(row);
       return { def, el: row.querySelector(".v") };
     });
@@ -698,8 +727,9 @@ async function main() {
   // Optional deep link: index.html?t=12&view=top&play=0#kitti-ekf (t in seconds).
   const q = new URLSearchParams(location.search);
   select(location.hash.slice(1) || SCENES[0].id);
-  if (q.has("t")) { state.t = clamp(parseFloat(q.get("t")) / cur.scene.dt, 0, cur.scene.n - 1); apply(); }
-  if (q.has("view")) setView(q.get("view"));
+  const tSeconds = parseFloat(q.get("t"));
+  if (Number.isFinite(tSeconds)) { state.t = clamp(tSeconds / cur.scene.dt, 0, cur.scene.n - 1); apply(); }
+  setView(q.get("view"));
   if (q.get("play") === "0") state.playing = false;
   window.__viewer = { state, SCENES, get cur() { return cur; }, setView, select };
 }
