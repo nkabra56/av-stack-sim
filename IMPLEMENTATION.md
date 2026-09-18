@@ -155,7 +155,7 @@ tests/
                        # see ros2_bridge.py's own docstring for what is/isn't verified and why
   test_simulation.py       # integration tests, harness-based, across scenarios x controllers x seeds
   test_foxglove_export.py   # MCAP export checks (need the `viz` extra)
-  test_web_export.py        # viewer scene schema: track/signal lengths, KITTI frame flip
+  test_web_export.py        # viewer scene schema (parking, KITTI, intersections, stop sign, lane), KITTI frame flip
   test_acc.py            # IDM/MPC-ACC unit + synthetic braking-lead scenario checks
   test_acc_validation.py    # IDM/MPC-ACC vs. real NGSIM data: safety, plausibility, determinism
   test_lane_centering.py    # Stanley convergence (both directions) + steering/speed edge cases
@@ -276,9 +276,9 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   self-consistent against noise the project generates for itself. `core/validation/` adds an
   independent check: the same, unmodified EKF replayed against real KITTI Odometry ground-truth
   poses (a committed 300-frame excerpt with real turns, `core/data/kitti/`), using the same
-  noise defaults as `SensorNode`/`VehicleNode`. Result: 0.85 m RMSE with corrections vs. 4.97 m
-  dead-reckoning-only on the excerpt, an 83% reduction, see DESIGN.md section 5,
-  "Validation against real data."
+  noise defaults as `SensorNode`/`VehicleNode`. Result: on seed 0, 0.85 m RMSE with corrections vs. 4.97 m
+  dead-reckoning-only; over 20 noise draws the medians are 0.91 m and 3.43 m (73% lower), see
+  DESIGN.md section 5, "Validation against real data."
 - **H1 (Adaptive cruise control): done.** First highway-mode milestone: `control/acc.py`
   (`IDMController`, `MpcAccController`), a longitudinal-only node set (`lead_vehicle_node.py`,
   `ego_longitudinal_node.py`, `radar_node.py`, `acc_controller_node.py`) and
@@ -400,12 +400,12 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   parallel-parking maneuver) and inspecting individual frames: the speed panel shows the governor's
   real oscillation during a tight reverse-forward sequence, and the sensor panel visibly shortens a
   beam exactly when the vehicle is close to an obstacle in that beam's direction, not just at rest.
-- **M6 (Tests)**: 280 tests across both modes run in ~340s. The 4 that need the optional `rl`/`viz`
-  extras skip via `pytest.importorskip`, so 276 run on a base install.
+- **M6 (Tests)**: 286 tests across both modes run in ~300s. The 4 that need the optional `rl`/`viz`
+  extras skip via `pytest.importorskip`, so 282 run on a base install.
 
 ## 4. Testing strategy
 
-Current (280 tests, ~340s: up from ~100s pre-H5, almost entirely because `test_full_highway.py`
+Current (286 tests, ~300s: up from ~100s pre-H5, almost entirely because `test_full_highway.py`
 replays a real 78s/780-frame NGSIM trajectory through the full node graph, parametrized over
 multiple controllers and seeds; the M2-era jump from ~20s to ~100s is explained in
 IMPLEMENTATION.md's M2 section above):

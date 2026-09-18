@@ -1,7 +1,7 @@
 # AV Stack Sim
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-276%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-282%20passing-brightgreen)](tests/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
 A from-scratch autonomous-driving stack in Python: state estimation, motion planning, and control
@@ -10,7 +10,7 @@ for **parking** (Dubins, Reeds-Shepp, Hybrid A*, Pure Pursuit, MPC) and **highwa
 node graph and one Extended Kalman Filter, and are validated against real KITTI and NGSIM
 driving data rather than synthetic noise alone.
 
-**[Open the interactive 3D viewer](https://nkabra56.github.io/av-stack-sim/viewer/)**: eight
+**[Open the interactive 3D viewer](https://nkabra56.github.io/av-stack-sim/viewer/)**: twelve
 replayable runs in your browser, no install.
 
 ![perpendicular parking demo](docs/media/perpendicular_open.gif)
@@ -25,23 +25,31 @@ estimate with its 1σ ellipse. The fan is the ultrasonic sensor array.*
 
 ## Interactive 3D viewer
 
-A browser replay of six parking scenarios, a highway drive behind a recorded human driver, and
-the real KITTI trajectory with the EKF plotted against dead reckoning. Switch between follow,
-overview, and top-down cameras, scrub or speed up playback, and toggle the planned path, trails,
-sensor rays, EKF uncertainty, and the simulator's collision circle.
+A browser replay of twelve runs. Three are parking. Five are highway and intersection driving:
+car following behind real recorded NGSIM traffic (MPC and IDM), a stop sign, a four-way stop, and
+a left turn. Four use real data: two KITTI drives, our controller beside a recorded human follower,
+and lane centering on a real lane. Switch between follow, overview, and top-down cameras, scrub or
+speed up playback, and toggle the planned path, trails, sensor rays, EKF uncertainty, and the
+simulator's collision circle.
 
-| Parking: reverse cusp between two cars (Hybrid A* + MPC) | Real KITTI drive: EKF vs. dead reckoning |
+| Parking: reverse cusp between two cars | Four-way stop with staggered arrivals |
 |---|---|
-| ![3D viewer, parallel parking](docs/media/viewer_parking.png) | ![3D viewer, KITTI drive](docs/media/viewer_kitti.png) |
+| ![3D viewer, parallel parking](docs/media/viewer_parking.png) | ![3D viewer, four-way stop](docs/media/viewer_intersection.png) |
+
+| Real KITTI drive: EKF vs. dead reckoning | Our controller beside a recorded human follower |
+|---|---|
+| ![3D viewer, KITTI drive](docs/media/viewer_kitti.png) | ![3D viewer, recorded follower](docs/media/viewer_follower.png) |
 
 ```bash
 python -m core.visualization.web_export                 # re-run the scenarios, write docs/viewer/scenes.js
 python -m http.server 8000 --directory docs/viewer      # then open http://localhost:8000
 ```
 
-The page loads three.js from a CDN, so it needs a network connection. Two fidelity notes: KITTI
-supplies the trajectory while its sensor noise is simulated, and the simulator's collision test is
-a 1.0 m circle, smaller than the drawn 4.5 m car, so close passes can look like overlaps (see
+The page loads three.js from a CDN, so it needs a network connection. Three fidelity notes: KITTI
+supplies the trajectory while its sensor noise is simulated; the parking collision test is a 1.0 m
+circle, smaller than the drawn 4.5 m car, so close passes can look like overlaps; and the highway
+harness locates the ego by nearest waypoint (2 m apart), so its reported gap can differ from the
+drawn one by up to 1 m, and the viewer shows the drawn geometry (see
 [DESIGN.md](DESIGN.md#9-known-limitations--assumptions)).
 
 ## Architecture
@@ -66,8 +74,8 @@ Tick order and the full diagram: [DESIGN.md](DESIGN.md#2-system-architecture).
 - **Classical vs. optimization-based control, twice.** Pure Pursuit vs. MPC for parking, IDM vs.
   constrained MPC for car following, with Stanley for lane centering. See
   [DESIGN.md](DESIGN.md#7-control) and [DESIGN.md](DESIGN.md#11-adaptive-cruise-control-h1).
-- **Real-data validation.** The EKF on a KITTI Odometry excerpt reaches 0.845 m RMSE against
-  4.966 m for dead reckoning (83% lower). Both ACC controllers replay a real 78 s NGSIM traffic
+- **Real-data validation.** The EKF on a KITTI Odometry excerpt has a median RMSE of 0.91 m over
+  20 noise draws, against 3.43 m for dead reckoning (73% lower, better on 19 of 20 draws). Both ACC controllers replay a real 78 s NGSIM traffic
   trace that includes a full stop. Stanley tracks a lane centerline built from about 10,400 real
   vehicle positions.
 - **Stochastic evaluation.** Success is a rate over 5 seeds, and safety is asserted on every
@@ -79,7 +87,7 @@ Tick order and the full diagram: [DESIGN.md](DESIGN.md#2-system-architecture).
 - **An RL baseline.** A PPO policy trained in a Gymnasium environment parks without collisions
   across 5 seeds on the open and flanked lots, and is compared with the planner and controller
   stack on success, collisions, and steps ([provenance](core/data/rl/PROVENANCE.md)).
-- **Tested and modular.** 280 tests (276 pass out of the box, 4 need the `rl` or `viz` extras),
+- **Tested and modular.** 286 tests (282 pass out of the box, 4 need the `rl` or `viz` extras),
   ruff-clean, with planners, controllers, and nodes swappable behind common interfaces.
 
 Reasoning and tradeoffs: [DESIGN.md](DESIGN.md). Module breakdown, milestones, and testing:
@@ -98,7 +106,7 @@ Validation against real data, generated by the commands in [Quickstart](#quickst
 | EKF vs. real KITTI Odometry | ACC vs. real NGSIM traffic | Stanley vs. a real NGSIM lane |
 |---|---|---|
 | ![KITTI EKF validation](docs/media/kitti_ekf_validation.png) | ![ACC validation against real NGSIM data](docs/media/acc_validation.png) | ![Lane centering validation against a real NGSIM lane](docs/media/lane_centering_validation.png) |
-| 0.845 m vs. 4.966 m dead reckoning | MPC-ACC on a 78 s congested US-101 trace | Cross-track error inside real drivers' 0.46 m lateral scatter |
+| Seed 0 shown: 0.845 m vs. 4.966 m dead reckoning | MPC-ACC on a 78 s congested US-101 trace | Cross-track error inside real drivers' 0.46 m lateral scatter |
 
 KITTI provides the trajectory only, so the odometry, compass, and position-fix noise in that
 validation is simulated on top of it.
@@ -107,7 +115,7 @@ validation is simulated on top of it.
 
 ```bash
 pip install -e ".[dev]"
-pytest                                                          # 276 pass, 4 more need `rl`/`viz`
+pytest                                                          # 282 pass, 4 more need `rl`/`viz`
 ruff check core tests                                           # lint
 
 # Parking

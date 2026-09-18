@@ -195,11 +195,13 @@ real vehicle slip and finite-difference noise, not a convention bug).
 
 The validation runs two passes over the *identical* noisy odometry stream: the EKF (predict +
 corrections) and dead-reckoning-only (predict only, no corrections), so the comparison isolates
-exactly what the corrections buy you. On the committed excerpt: **0.85 m RMSE with corrections
-vs. 4.97 m without, an 83% error reduction**, on a real trajectory the filter was never tuned
-against. `tests/test_kitti_ekf_validation.py` asserts the EKF strictly beats dead-reckoning-only
-(the robust claim: no arbitrary accuracy threshold to pick) rather than asserting a specific
-RMSE number, since the exact figure is a property of this one excerpt, not a guarantee.
+exactly what the corrections buy you. On the committed excerpt with the default noise draw (seed 0): **0.85 m RMSE with corrections
+vs. 4.97 m without, an 83% reduction**. That draw flatters the comparison, because dead reckoning
+is a random walk whose error depends heavily on the draw. Over 20 draws the EKF stays between
+0.85 and 1.02 m (median 0.91 m) while dead reckoning ranges from 0.94 to 10.9 m (median 3.43 m),
+a median reduction of 73%, and the EKF wins 19 of 20 draws. `tests/test_kitti_ekf_validation.py`
+asserts the win on seed 0 and on at least 18 of 20 draws rather than a specific RMSE number, since
+the exact figure is a property of this one excerpt, not a guarantee.
 
 ## 6. Path planning
 
@@ -426,6 +428,12 @@ selectable per scenario via `demo.py --controller mpc`.
   more than 2 cm, but Pure Pursuit's stop on `parallel_between_cars` leaves the drawn nose about 1.2 m
   inside the obstacle's circle. "Fails safe" therefore holds under the simulator's collision model,
   not for the drawn footprint.
+- The highway harness locates the ego by projecting onto the nearest centerline waypoint (waypoints are
+  2 m apart), so its reported gap and `min_gap` carry up to 1 m of quantization error. On the two
+  viewer runs (seed 1) the geometric minimum gap is 2.8 m for MPC-ACC and 2.5 m for IDM against 1.8 m
+  reported by the harness, so the reported figure was conservative there. The viewer draws and reports
+  the geometric gap. Whether the quantization can hide a true overlap in other configurations has not
+  been checked.
 
 ## 10. Future extensions
 
@@ -578,8 +586,8 @@ not a strict target, since the real driver isn't assumed optimal).
   from Section 11's `min_gap` finding.
 
   **Design choice**: rather than rewrite `predict()` to take acceleration instead of speed (which
-  would risk the parking mode's already-validated 3-state path, 83% RMSE reduction against real
-  KITTI data, per IMPLEMENTATION.md's MV milestone), the 4-state mode is purely additive: two new
+  would risk the parking mode's already-validated 3-state path and its real-KITTI result, per IMPLEMENTATION.md's MV
+  milestone), the 4-state mode is purely additive: two new
   methods, plus generalizing `_apply_update`/`update_heading`/`update_position`/`update_landmark`
   to size themselves off `len(self.x)` instead of a hardcoded 3 (so they keep working unchanged
   for a 4-state instance). Verified as a true zero-behavior-change refactor for the 3-state case
@@ -603,7 +611,7 @@ not a strict target, since the real driver isn't assumed optimal).
 
   **Real lane geometry, not hand-authored**: `lane_centerline.csv` aggregates ~10,400 individual
   real vehicle positions from NGSIM's US-101 lane 2 (the full download, not just H1's committed
-  leader/follower excerpt), binned every 2m and lightly smoothed, a genuine 1.76m end-to-end
+  leader/follower excerpt), binned every 2m and lightly smoothed, a genuine 1.56m end-to-end
   lateral drift over 642m, real curvature nobody typed in by hand. The same dataset now validates
   both H1 (real time-series replay) and H3 (real spatial geometry), two different uses of one
   source. Validation methodology differs from H1's replay style, though: NGSIM records where real
