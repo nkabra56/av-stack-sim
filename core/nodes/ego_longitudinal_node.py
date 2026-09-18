@@ -1,16 +1,5 @@
-"""Owns the ego vehicle's longitudinal state (position, speed) as a simple 1D
-point-mass -- H1 (ACC) is straight-line following only, so the full 2D kinematic
-bicycle model (`Vehicle`) isn't needed yet; it comes back in H3 once lateral control
-(lane centering) is in the picture. See DESIGN.md's ACC section.
-
-Clamps the commanded acceleration to physical actuator limits, same principle as
-VehicleNode clamping steering/accel for the parking mode: a controller can command
-anything, this node is what enforces what's actually achievable.
-
-Publishes both the true state (`ego_state`, visible only to RadarNode and the
-harness's own evaluation logic -- same ground-truth boundary as everywhere else) and
-noisy `accel_odometry`/`speedometer` readings (H2) for SpeedEstimatorNode to fuse.
-"""
+"""Owns the ego vehicle's longitudinal state as a simple 1D point-mass -- H1 (ACC) is
+straight-line only; the full 2D Vehicle comes back in H3. See DESIGN.md's ACC section."""
 
 import numpy as np
 

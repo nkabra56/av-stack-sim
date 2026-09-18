@@ -1,38 +1,6 @@
-"""Dubins path planner: the shortest curvature-constrained path for a forward-only
-car between two poses, given a fixed minimum turning radius. See DESIGN.md section 6.
-
-This is the M1 baseline planner. It replaces an earlier fixed-Bezier-curve baseline
-that turned out to be kinematically infeasible near sharp heading changes -- a
-generic smooth curve has no reason to respect the vehicle's actual turning radius,
-and for something like a 90-degree perpendicular-parking turn compressed into a short
-chord, that produced curvature far tighter than the vehicle could physically steer.
-Dubins paths are built from exactly two arcs of the vehicle's own turning radius plus
-a straight segment, so every generated path is trackable by construction: curvature
-is always either 0 (straight) or exactly 1/turning_radius (on an arc), never more.
-
-Uses the standard alpha/beta/d normalized formulation (LaValle, *Planning
-Algorithms*, ch. 15) for all four Circle-Straight-Circle families (LSL, RSR, LSR,
-RSL) and picks the shortest feasible one. All four are needed, not just the
-same-direction pair (LSL/RSR): a same-heading lateral offset (e.g. pulling a couple
-meters sideways into a parallel spot with no net turn) has no short same-direction
-solution -- shifting sideways while ending at the same heading via same-direction
-turns alone requires looping almost all the way around, whereas the
-opposite-direction families (LSR/RSL) produce the short "S-curve" shift directly.
-Triple-arc families (LRL, RLR) aren't implemented here. Note (added while investigating
-KNOWN_BUGS.md entry 5 for reeds_shepp.py, which shares this module's CSC solve): the
-"only matters when circles are closer than 4x turning_radius, otherwise CSC is
-infeasible" framing above turned out to be a mistaken premise for this specific
-4-family implementation -- a rigorous search found no `(alpha, beta, d)` where all 4
-CSC families are simultaneously infeasible, so CSC alone is apparently always
-sufficient for *feasibility*, at any distance. CCC can still produce a *shorter* path
-in the close-pose regime (which is why reeds_shepp.py added it for its own standalone
-planner), but that's a path-quality question, not a feasibility one -- left unimplemented
-here since DubinsPlanner is deliberately forward-only and out of KNOWN_BUGS entry 5's
-scope, not because the original infeasibility rationale still holds.
-
-Still does not avoid obstacles (ignores `obstacles`) and cannot reverse -- both
-addressed by Hybrid A*/Reeds-Shepp in M2 (see IMPLEMENTATION.md).
-"""
+"""Dubins path planner: the shortest curvature-constrained path for a forward-only car
+between two poses, via the standard 4-family CSC (LSL/RSR/LSR/RSL) formulation. Doesn't
+avoid obstacles or reverse -- see Hybrid A*/Reeds-Shepp for that. DESIGN.md section 6."""
 
 import numpy as np
 
@@ -106,12 +74,8 @@ def _straight_points(pose: Pose, distance: float, n: int) -> np.ndarray:
 def _solve_csc(
     start: Pose, goal: Pose, turning_radius: float
 ) -> tuple[float, str, str, float, float, float] | None:
-    """Shortest feasible CSC (Dubins) candidate from start to goal: (length, first,
-    last, t, p, q), where t/q are the two arcs' swept angles (radians) and p is the
-    straight segment's length in turning_radius units. None if all 4 CSC families are
-    infeasible -- only happens when the start/goal turning circles are closer than
-    ~4x turning_radius, the CCC-only regime (see reeds_shepp.py, which reuses this).
-    """
+    """Shortest feasible CSC (Dubins) candidate: (length, first, last, t, p, q), t/q the
+    arcs' swept angles and p the straight length. None if all 4 families are infeasible."""
     ex, ey = goal[0] - start[0], goal[1] - start[1]
     dist = np.hypot(ex, ey)
     chord_theta = np.arctan2(ey, ex) if dist > 1e-9 else start[2]
@@ -135,17 +99,7 @@ def _walk_segments(
     start: Pose, seg_defs: list[tuple[str, float]], turning_radius: float, step: float
 ) -> np.ndarray:
     """Walk a (kind, magnitude) segment list from start, sampling at fixed arc-length
-    `step` (meters) -- a fixed step keeps per-call cost proportional to actual path
-    length, needed by reeds_shepp.py/hybrid_astar.py which call this many times per
-    search at widely varying lengths.
-
-    `kind == "S"` is a straight segment of length `magnitude` (already a real
-    distance, not scaled by `turning_radius`); any other kind ("L"/"R") is an arc of
-    swept angle `magnitude` radians at `turning_radius`. Shared by dubins.py's CSC
-    composer (`_csc_points`, 3 segments, one "S") and reeds_shepp.py's CCC composer
-    (`_ccc_points`, 3 segments, all turns) -- the two families only differ in which
-    segment kinds appear, not in how they're sampled or stitched together, so they'd
-    otherwise duplicate this exact step-count/stitching logic."""
+    `step` -- shared by dubins.py's CSC composer and reeds_shepp.py's CCC composer."""
     seg_lengths = np.array([mag if kind == "S" else turning_radius * mag for kind, mag in seg_defs])
     total = seg_lengths.sum()
     counts = np.maximum(2, np.round(seg_lengths / step).astype(int)) if total > 1e-9 else [2] * len(seg_defs)

@@ -1,11 +1,4 @@
-"""CLI entry point: run a named scenario and show (or save) the animation.
-
-Usage:
-    python -m core.demo perpendicular_open
-    python -m core.demo perpendicular_open --controller mpc
-    python -m core.demo perpendicular_open --save out.gif
-    python -m core.demo perpendicular_open --seed 7
-"""
+"""CLI entry point: run a named scenario and show or save the animation. See --help for options."""
 
 import argparse
 import sys

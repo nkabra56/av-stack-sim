@@ -1,7 +1,5 @@
-"""Replays a real recorded lead-vehicle trajectory (e.g. from NGSIM) tick by tick. This
-is a scripted external agent, not something our stack controls -- it doesn't get a
-controller, it publishes ground truth being replayed. See DESIGN.md's ACC section.
-"""
+"""Replays a real recorded lead-vehicle trajectory (e.g. NGSIM) tick by tick -- a scripted
+external agent, not something our stack controls. See DESIGN.md's ACC section."""
 
 import numpy as np
 

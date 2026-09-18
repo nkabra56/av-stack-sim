@@ -1,17 +1,5 @@
-"""Validates control/acc.py's controllers against a real recorded car-following
-trajectory (NGSIM) instead of only synthetic scenarios. See DESIGN.md's ACC section.
-
-Replays the real leader's recorded speed profile through LeadVehicleNode; runs *our*
-ACC controller as the follower in simulation via AccHarness. Unlike the KITTI EKF
-validation (which replays real data through an unmodified estimator and compares its
-output directly to ground truth), a controller's closed-loop behavior isn't directly
-comparable to what a human driver actually did -- so this validates three different
-things instead: (1) safety, a hard pass/fail (gap never reaches zero), (2) comfort
-(bounded jerk), and (3) plausibility -- our controller's resulting gap/time-headway
-should land in a realistic range, sanity-checked against the *real* follower's own
-recorded Space_Headway/Time_Headway from the same data, not asserted to match it
-exactly (the real driver isn't assumed optimal).
-"""
+"""Validates control/acc.py's controllers against a real recorded NGSIM car-following
+trajectory: safety (gap never zero), comfort (bounded jerk), plausibility vs. the real follower."""
 
 import argparse
 from dataclasses import dataclass

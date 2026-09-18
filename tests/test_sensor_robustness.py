@@ -1,20 +1,5 @@
-"""End-to-end robustness of the closed loop under sensor dropout/latency (DESIGN.md
-section 10's future-extensions list) -- SensorNode's dropout_prob/latency_ticks are
-unit-tested directly in test_sensor_node.py; these confirm the *closed loop* (EKF +
-planner + controller together) stays collision-free under them across real scenarios,
-not just that individual messages are dropped/delayed correctly in isolation.
-
-Thresholds below (dropout_prob<=0.2, latency_ticks<=10) aren't arbitrary -- a real
-sweep (dropout 0.1-0.4, latency 5-50, both controllers, all 5 scenarios, 5 seeds each)
-found this is where safety actually holds; beyond it, real collisions start (dropout
-0.3 reopens KNOWN_BUGS.md entry 2's already-razor-thin parallel_between_cars/
-pure_pursuit margin; latency 20+ lets EKF corrections lag long enough that dead-
-reckoning drift alone -- confirmed directly: true/estimated position error reached
-2.7-4.0m in one such run -- lets a reactive controller steer the *true* vehicle into
-an obstacle the *estimated* vehicle would have cleared, a materially different failure
-mode than anything a stopping-buffer margin can fix). See KNOWN_BUGS.md for the full
-account of both residuals.
-"""
+"""End-to-end robustness of the closed loop under sensor dropout/latency -- SensorNode's
+own params are unit-tested in test_sensor_node.py. Thresholds below come from a real sweep (KNOWN_BUGS.md)."""
 
 import numpy as np
 import pytest
@@ -59,9 +44,7 @@ def test_never_collides_under_sensor_latency(scenario_name, controller_name):
 
 def _min_clearance(true_history: np.ndarray, obstacles) -> float:
     """Minimum signed vehicle-to-obstacle clearance across a run: negative means the
-    vehicle's collision circle actually overlapped an obstacle's (by that many meters),
-    positive means it stayed clear by that much. Same circle-circle geometry as
-    `ParkingHarness._collided`, just continuous instead of thresholded at exactly 0."""
+    vehicle's collision circle overlapped an obstacle's. Same geometry as ParkingHarness._collided."""
     xy = true_history[:, :2]
     return min(
         float(np.min(np.hypot(xy[:, 0] - o.x, xy[:, 1] - o.y) - (o.radius + VEHICLE_RADIUS)))
@@ -70,31 +53,12 @@ def _min_clearance(true_history: np.ndarray, obstacles) -> float:
 
 
 def test_latency_margin_is_what_actually_closes_the_gap():
-    """Regression for the fix itself: on this exact case, a controller that doesn't
-    know about the delay (latency_margin forced to 0, simulating the pre-fix governor)
-    penetrates a real obstacle by several centimeters; the real fix (latency_margin
-    computed from sensor_latency_ticks) keeps a comfortable multi-decimeter clearance
-    instead -- confirms the governor's extra margin is load-bearing, not redundant with
-    something else that would have caught it anyway. `parallel_between_cars` is
-    already KNOWN_BUGS.md entry 2's tightest-margin scenario, so it's also the most
-    sensitive one to a missing margin.
-
-    Asserts on continuous minimum clearance, not the boolean `result.collision`, with
-    real numerical headroom on both sides of zero -- KNOWN_BUGS.md entry 8: at this
-    test's original `latency_ticks=5`, the no-fix case is itself only a ~2-7mm
-    penetration (measured across seeds 1-5), smaller than the floating-point
-    differences a different BLAS-backend/CPU platform's SLSQP solve (`MPCController`)
-    produces over this trajectory's ~300+ ticks -- observed to flip the boolean outcome
-    between a Windows host and a Linux Docker container despite byte-identical
-    numpy/scipy versions on both. `latency_ticks=10` -- still inside this scenario's
-    own documented verified-safe upper bound (entry 7) -- produces a consistent ~6cm
-    penetration without the fix and >15cm clearance with it, confirmed matching between
-    host and container to within ~3mm, well clear of that noise floor."""
+    """Regression for the fix itself: forcing latency_margin to 0 (the pre-fix governor)
+    penetrates a real obstacle; the real fix keeps a comfortable clearance instead (KNOWN_BUGS.md entry 8)."""
 
     def _run(latency_margin_override: float | None) -> float:
-        # Reloaded per call, not shared: VehicleNode.update() mutates the Vehicle object
-        # it's given in place, so reusing one `scenario` across both calls would have the
-        # second run silently start from wherever the first run's vehicle ended up.
+        # Reloaded per call, not shared: VehicleNode.update() mutates the Vehicle in place,
+        # so reusing one scenario would have the second run start where the first ended.
         scenario = load_scenario("parallel_between_cars")
         planner = HybridAStarPlanner()
         controller = MPCController(

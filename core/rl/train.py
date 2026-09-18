@@ -1,10 +1,5 @@
-"""Trains a PPO policy on ParkingEnv. See core/rl/parking_env.py for the environment
-itself and core/validation/rl_comparison.py for evaluating the result against the
-planner+controller baseline.
-
-Usage:
-    python -m core.rl.train perpendicular_open --timesteps 200000 --save model.zip
-"""
+"""Trains a PPO policy on ParkingEnv. See core/rl/parking_env.py for the environment and
+core/validation/rl_comparison.py for evaluating it against the planner+controller baseline."""
 
 import argparse
 

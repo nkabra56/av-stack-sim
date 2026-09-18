@@ -1,14 +1,5 @@
-"""3D Foxglove scene export: an additive alternative to animate.py's Matplotlib
-animation, for producing a showcase-quality recording (see FOXGLOVE_VIZ_PLAN.md).
-
-Writes an MCAP file containing a `/scene` (SceneUpdate) topic driving a 3D view --
-ground/lot markings, obstacles, the ego vehicle, its true and EKF-estimated
-trajectories, the 1-sigma uncertainty ellipse, and a live ultrasonic sensor fan --
-plus a `/tf` FrameTransform for the vehicle pose (so a Foxglove layout's 3D panel can
-camera-follow the "vehicle" frame), and `/speed` / `/sensors` / `/status` JSON
-channels for Foxglove's own Plot/Raw Messages panels. Open the result in the free
-Foxglove desktop app; see README.md's "3D visualization (Foxglove)" section.
-"""
+"""3D Foxglove scene export: an additive alternative to animate.py's Matplotlib animation.
+Writes an MCAP file (/scene, /tf, /speed, /sensors, /status channels). See FOXGLOVE_VIZ_PLAN.md."""
 
 import math
 from pathlib import Path

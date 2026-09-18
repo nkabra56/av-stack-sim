@@ -1,13 +1,5 @@
-"""ControllerNode's speed governor (see its module docstring, KNOWN_BUGS.md entry 2)
-must be direction-aware, not just distance-aware -- found in code review after entry
-2's fix shipped: the original version took the closest ultrasonic reading across *all*
-beams regardless of which way the vehicle was actually trying to move, which meant a
-reverse-gear maneuver got zero protection from an obstacle behind the vehicle (outside
-the forward-only sensor cone at the time) while simultaneously being needlessly
-throttled while reversing *away* from something in front. These tests pin the fix
-directly and deterministically, independent of any specific scenario's closed-loop
-dynamics.
-"""
+"""ControllerNode's speed governor must be direction-aware, not just distance-aware (found
+in code review after KNOWN_BUGS.md entry 2 shipped) -- these tests pin that fix directly."""
 
 import numpy as np
 
@@ -79,9 +71,8 @@ def test_far_obstacles_never_throttle_either_direction():
 
 
 def test_harness_ultrasonic_array_has_a_rear_cone():
-    """Regression guard for harness.py's DEFAULT_SENSOR_ANGLES: at least one beam angle
-    must point behind the vehicle (|angle| > pi/2), or the governor has nothing to be
-    direction-aware *about*."""
+    """Regression guard for harness.py's DEFAULT_SENSOR_ANGLES: at least one beam must
+    point behind the vehicle, or the governor has nothing to be direction-aware about."""
     from core.harness import DEFAULT_SENSOR_ANGLES
     from core.vehicle import wrap_angle
 
@@ -89,13 +80,8 @@ def test_harness_ultrasonic_array_has_a_rear_cone():
     assert any(abs(wrap_angle(a)) < np.pi / 2 for a in DEFAULT_SENSOR_ANGLES)
 
 
-# --- Tracking-aware buffer (KNOWN_BUGS.md entry 3): direct, deterministic coverage --
-# of `_effective_buffer` in isolation, independent of any closed-loop scenario's
-# dynamics -- the closed-loop proof that this doesn't reopen entry 2's collision (or
-# that it actually lets entry 3's scenario complete) lives in test_replanning.py, which
-# needed a real parameter sweep since it's a genuinely dynamical question; whether
-# `_effective_buffer` itself picks the right buffer for a given cross-track distance is
-# not, and deserves the same direct-and-fast coverage as the rest of this file.
+# --- Tracking-aware buffer (KNOWN_BUGS.md entry 3): direct coverage of _effective_buffer
+# in isolation; the closed-loop proof lives in test_replanning.py's parameter sweep.
 
 
 def _node_with_pose_and_path(bus: Bus, path_y: float, pose_y: float, **kwargs) -> ControllerNode:
@@ -106,10 +92,8 @@ def _node_with_pose_and_path(bus: Bus, path_y: float, pose_y: float, **kwargs) -
 
 
 def test_effective_buffer_defaults_to_stopping_buffer_when_tracking_disabled():
-    """tracked_stopping_buffer=None (the ControllerNode default) must disable the
-    feature entirely, regardless of how well the vehicle happens to be tracking --
-    this is what keeps every planner without an exposed `safety_margin`
-    (Dubins/ReedsShepp) on the fully conservative buffer."""
+    """tracked_stopping_buffer=None (the default) must disable the feature entirely --
+    what keeps every planner without an exposed safety_margin on the conservative buffer."""
     bus = Bus()
     node = _node_with_pose_and_path(bus, path_y=0.0, pose_y=0.0, stopping_buffer=0.5)
     assert node._effective_buffer() == 0.5

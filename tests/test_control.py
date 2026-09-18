@@ -1,10 +1,5 @@
-"""Direct convergence unit coverage for the two path-tracking controllers, decoupled
-from a real planner -- given a straight-line path and no obstacles, does each
-controller's closed loop actually reach the goal (see IMPLEMENTATION.md section 4).
-test_simulation.py already covers this end-to-end (planner + controller + noisy
-estimation, across real scenarios); this isolates the controller alone against a
-trivial, hand-built path, so a controller regression shows up here without needing a
-planner or the estimation stack to also be working."""
+"""Direct convergence unit coverage for the two path-tracking controllers, decoupled from
+a real planner -- test_simulation.py covers the full stack; this isolates the controller."""
 
 import numpy as np
 import pytest
@@ -50,9 +45,8 @@ def test_converges_to_the_goal_from_directly_on_the_path(controller_name):
 
 @pytest.mark.parametrize("controller_name", list(CONTROLLERS))
 def test_converges_to_the_goal_from_a_lateral_offset(controller_name):
-    """A real tracking test, not just "drive straight ahead": start 1.5m off the
-    path's line and confirm the controller actually steers back onto it and still
-    reaches the goal, not just moves forward."""
+    """A real tracking test: start 1.5m off the path's line and confirm the controller
+    steers back onto it and still reaches the goal, not just moves forward."""
     vehicle = _run(controller_name, start_y=1.5)
     assert np.hypot(GOAL[0] - vehicle.x, GOAL[1] - vehicle.y) < TOL
 

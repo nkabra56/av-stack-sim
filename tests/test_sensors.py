@@ -1,6 +1,5 @@
 """Hand-computed ray/circle intersection cases for UltrasonicArray.sense -- direct unit
-coverage for the geometry itself, on top of the integration-level coverage
-test_simulation.py already provides (see IMPLEMENTATION.md section 4)."""
+coverage on top of test_simulation.py's integration-level coverage."""
 
 import numpy as np
 import pytest
@@ -29,9 +28,8 @@ def test_obstacle_out_of_range_reads_max_range():
 
 
 def test_obstacle_behind_the_beam_direction_is_ignored():
-    """Obstacle at (-5, 0), beam pointing along +x -- both ray/circle intersection
-    parameters are negative (behind the ray's origin), so they're excluded by the
-    `0 <= t` check and the beam reports max_range, not a negative/behind hit."""
+    """Obstacle at (-5, 0), beam pointing along +x -- both intersection params are
+    negative (behind the ray's origin), excluded by the `0 <= t` check."""
     sensor = UltrasonicArray(angles=[0.0], max_range=10.0)
     vehicle = Vehicle(x=0.0, y=0.0, theta=0.0)
     readings = sensor.sense(vehicle, [Obstacle(x=-5.0, y=0.0, radius=1.0)])
@@ -48,9 +46,8 @@ def test_obstacle_off_to_the_side_of_a_straight_beam_is_a_true_miss():
 
 
 def test_tangent_obstacle_touches_at_exactly_one_point():
-    """Obstacle at (5, 1) r=1, beam along +x -- the ray is exactly tangent to the
-    circle (discriminant == 0), touching at x=5. Both quadratic roots coincide, so the
-    reading is the single tangent-point distance, not a NaN or a double-counted miss."""
+    """Obstacle at (5, 1) r=1, beam along +x -- exactly tangent (discriminant == 0),
+    touching at x=5. Both quadratic roots coincide; reading is the tangent-point distance."""
     sensor = UltrasonicArray(angles=[0.0], max_range=10.0)
     vehicle = Vehicle(x=0.0, y=0.0, theta=0.0)
     readings = sensor.sense(vehicle, [Obstacle(x=5.0, y=1.0, radius=1.0)])

@@ -1,13 +1,5 @@
-"""Stanley lane-centering controller -- the classical lateral-control law, playing
-the same "geometric baseline" role Pure Pursuit (parking) and IDM (ACC) play
-elsewhere. See DESIGN.md section 12's H3 entry.
-
-Unlike this project's other controllers (which act on HasPose alone), Stanley's
-formula divides by speed, so `control()` takes it as an explicit third argument
-rather than requiring every pose object to carry one -- HasPose stays a minimal
-x/y/theta contract, and callers that have a speed (true, estimated, or assumed
-constant) pass it explicitly.
-"""
+"""Stanley lane-centering controller -- the classical lateral-control law, same role
+Pure Pursuit (parking) and IDM (ACC) play elsewhere. See DESIGN.md section 12's H3 entry."""
 
 import numpy as np
 
@@ -22,9 +14,8 @@ class StanleyController:
         self.max_steer = max_steer
 
     def control(self, pose: HasPose, path: np.ndarray, speed: float) -> float:
-        # Stanley's cross-track error is measured at the front axle, not the vehicle's
-        # own (rear-axle) reference point -- steering corrects what's actually about
-        # to leave the lane, not where the car's center happens to be right now.
+        # Cross-track error is measured at the front axle, not the rear-axle reference
+        # point -- steering corrects what's about to leave the lane.
         front_x = pose.x + self.wheelbase * np.cos(pose.theta)
         front_y = pose.y + self.wheelbase * np.sin(pose.theta)
 
@@ -32,19 +23,14 @@ class StanleyController:
         idx = int(np.argmin(dists))
         path_x, path_y, path_theta = path[idx]
 
-        # Signed cross-track error: positive means the front axle is to the RIGHT of
-        # the path's direction of travel (project the position error onto the path's
-        # right-normal (sin theta, -cos theta)) -- this sign convention is what makes
-        # `correction` below steer *toward* the path rather than away from it; getting
-        # this backwards doesn't error, it just diverges (caught by a standalone
-        # convergence test before this controller was wired into anything else).
+        # Signed cross-track error: positive means the front axle is right of the path's
+        # direction of travel (position error projected onto the path's right-normal).
         dx, dy = front_x - path_x, front_y - path_y
         cross_track_error = dx * np.sin(path_theta) - dy * np.cos(path_theta)
 
         heading_error = wrap_angle(path_theta - pose.theta)
-        # atan2(k*cte, speed) blends toward zero correction as speed -> 0 rather than
-        # exploding (a raw division would); using |speed| plus a small floor keeps the
-        # correction meaningful even at a near-stop instead of chattering near v=0.
+        # atan2(k*cte, speed) blends toward zero correction as speed -> 0; a speed floor
+        # avoids chattering near a near-stop.
         correction = np.arctan2(self.k * cross_track_error, max(abs(speed), 0.5))
         delta = heading_error + correction
         return float(np.clip(delta, -self.max_steer, self.max_steer))

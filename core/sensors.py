@@ -7,11 +7,8 @@ from core.vehicle import Vehicle
 
 
 class UltrasonicArray:
-    """A fixed set of beams, each cast against circular obstacles.
-
-    Beam angles are relative to the vehicle heading. Each beam returns the distance
-    to the nearest ray/circle intersection, or max_range if nothing is hit.
-    """
+    """Fixed beams (angles relative to heading) cast against circular obstacles; each
+    returns the nearest hit distance, or max_range if nothing is hit."""
 
     def __init__(self, angles: list[float], max_range: float = 5.0):
         self.angles = angles

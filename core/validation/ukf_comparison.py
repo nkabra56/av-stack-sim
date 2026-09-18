@@ -1,24 +1,6 @@
-"""Head-to-head EKF vs. UKF comparison -- the actual evidence behind estimation/ukf.py's
-claim that sigma-point propagation is a genuinely different algorithm, and the answer
-to DESIGN.md section 10's future-extensions question: is the EKF's linearization
-"a fine approximation... but it's an approximation" actually fine here, demonstrated
-with real numbers rather than just asserted?
-
-Two comparisons, both feeding both filters the *exact same* noisy odometry/measurement
-draws each step (one shared RNG stream, not two independent ones) so any RMSE
-difference is attributable to the propagation method, not to different noise luck:
-
-1. `validate_against_kitti`: real driven trajectory (KITTI Odometry ground truth,
-   reusing kitti_ekf_validation.py's data/noise model exactly) -- gentle, real-world
-   turning rates, the actual regime this project's EKF has always been validated
-   against.
-2. `validate_tight_turn_stress`: a synthetic circular arc at the vehicle's own
-   physical minimum turning radius (`Vehicle.turning_radius`, ~3.9m at wheelbase=2.7/
-   max_steer=0.6 -- not an arbitrary "make it extreme" number, the tightest curve this
-   project's own kinematic model can actually produce), deliberately the most
-   nonlinear regime the bicycle model reaches in practice, with exactly known ground
-   truth (closed-form circular motion) rather than needing external data.
-"""
+"""Head-to-head EKF vs. UKF comparison: validate_against_kitti (real KITTI trajectory) and
+validate_tight_turn_stress (synthetic, at the vehicle's own minimum turning radius) both feed
+both filters identical noise draws, so any RMSE difference is attributable to propagation method."""
 
 import argparse
 from dataclasses import dataclass
@@ -142,10 +124,8 @@ def validate_tight_turn_stress(
     dt: float = 0.1,
     n_steps: int = 400,
 ) -> ComparisonResult:
-    """Synthetic full-circle drive at the vehicle's own tightest physical turning
-    radius -- ground truth is exact closed-form circular motion, not measured data, so
-    this isolates linearization error itself rather than also including whatever
-    residual noise/discretization the KITTI recording has."""
+    """Synthetic full-circle drive at the vehicle's own tightest turning radius -- exact
+    closed-form ground truth, isolating linearization error from KITTI's residual noise."""
     vehicle = Vehicle(wheelbase=2.7, max_steer=0.6)
     delta = vehicle.max_steer
     wheelbase = vehicle.wheelbase

@@ -1,24 +1,6 @@
-"""Wraps the existing Planner (e.g. DubinsPlanner) unchanged. Plans once, off the
-first pose_estimate it receives, and publishes path. Critically, it plans from the
-vehicle's ESTIMATED pose, not ground truth: a real planner never gets to see the true
-state either.
-
-**Re-planning** (see KNOWN_BUGS.md entry 3 / IMPLEMENTATION.md's M4 entry, "still open:
-wiring PlannerNode to re-plan"): `ControllerNode` publishes `replan_request` once its
-speed governor has been binding long enough to look like a genuine stall. On that
-signal, this node re-plans from the *latest* pose estimate against the environment's
-*current* obstacle list -- re-reading `self.environment.obstacles` live (not the
-snapshot from the first plan) is what actually closes the bug: a scenario that adds an
-obstacle to that list mid-run (see `tests/test_replanning.py`) is invisible to the
-original plan but fully visible to a re-plan. Capped at `max_replans` attempts so a
-combination that's stuck for a structural reason (e.g. no route exists, or a controller
-that can't track any route through this geometry -- see KNOWN_BUGS.md entry 2) doesn't
-re-run an expensive Hybrid A* search forever; past the cap, the vehicle just stays
-governed to a safe stop, exactly like before this fix, rather than looping. A planner
-that raises (no route currently exists -- every shipped `Planner` fails with some
-`RuntimeError` subclass: `PlanningFailure`, or a plain `RuntimeError` for
-Dubins/ReedsShepp) leaves the old path in place rather than crashing the simulation.
-"""
+"""Wraps the existing Planner unchanged: plans once from the first pose_estimate, off the
+ESTIMATED pose not ground truth. Re-plans on `replan_request`, capped at `max_replans`
+(see KNOWN_BUGS.md entry 3). A planner that raises leaves the old path in place."""
 
 from core.environment import Environment
 from core.interfaces import Planner

@@ -1,11 +1,5 @@
-"""Runs an IntersectionNavigator against a scripted other-vehicle scenario. See
-DESIGN.md section 12's H4 entry.
-
-Simpler than harness.py/highway_harness.py's pub/sub node structure on purpose: there's
-no sensor noise or multi-component estimation happening here (the point of H4 is the
-right-of-way reasoning, not sensor fusion), so a direct simulation loop is honest about
-what's actually being tested, the same call made for H3's lane-centering validation.
-"""
+"""Runs an IntersectionNavigator against a scripted other-vehicle scenario. Simpler than
+harness.py's pub/sub structure on purpose -- H4 tests right-of-way, not sensor fusion."""
 
 from dataclasses import dataclass, field
 from typing import Callable

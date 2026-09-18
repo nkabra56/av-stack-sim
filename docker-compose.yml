@@ -1,6 +1,5 @@
-# Convenience wrappers around the two Dockerfile targets -- see Dockerfile's own
-# comments for what each target includes. `docker compose run --rm <service> ...`
-# appends extra arguments to the service's command, same as `docker run <image> ...`.
+# Convenience wrappers around the two Dockerfile targets -- see Dockerfile's own comments.
+# `docker compose run --rm <service> ...` appends args, same as `docker run <image> ...`.
 services:
   test:
     build:

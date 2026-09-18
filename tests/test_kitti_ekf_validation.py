@@ -10,11 +10,7 @@ def test_excerpt_data_is_present():
 
 def test_ekf_beats_dead_reckoning_on_real_kitti_data():
     """The core claim: fusing periodic corrections against a real driven trajectory
-    actually reduces error versus integrating noisy odometry alone -- not just on the
-    synthetic noise the project generates for itself (test_ekf.py), but on real KITTI
-    ground truth. No arbitrary accuracy threshold to pick; a strict improvement over
-    the dead-reckoning-only baseline is the right thing to assert.
-    """
+    reduces error vs. odometry alone. No arbitrary threshold -- strict improvement over dead reckoning."""
     sequence = load_kitti_poses(DEFAULT_POSES_PATH)
     result = validate(sequence, seed=0)
     assert result.ekf_rmse < result.dr_rmse

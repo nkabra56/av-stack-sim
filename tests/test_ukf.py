@@ -19,9 +19,7 @@ def _ukf(x0=(0.0, 0.0, 0.0), p0_scale=0.05, odom_v_std=0.03, odom_delta_std=0.01
 
 def test_predict_only_matches_closed_form_arc():
     """Same check as test_ekf.py's version, applied to the UKF: with zero odometry
-    noise, sigma-point propagation of a deterministic bicycle-model turn should land
-    on the same closed-form arc the EKF's linearized version does -- both are
-    supposed to be unbiased for the mean, they just handle covariance differently."""
+    noise, the sigma-point mean should land on the same closed-form arc as the EKF."""
     wheelbase = 2.7
     delta = 0.3
     v = 1.0
@@ -73,11 +71,8 @@ def test_predict_grows_covariance():
 
 
 def test_update_landmark_on_top_of_the_landmark_does_not_raise_or_produce_nan():
-    """Unlike ekf.py's update_landmark, this measurement function is only ever
-    evaluated at sigma points, not differentiated -- so there's no 1/range or 1/range^2
-    Jacobian term to blow up. Confirms that's actually true (no special-casing needed
-    here, unlike the EKF), not just assumed: landing exactly on the landmark should
-    stay finite and well-behaved."""
+    """Unlike ekf.py's update_landmark, this is only ever evaluated at sigma points, never
+    differentiated -- no 1/range Jacobian to blow up. Confirms that's actually true."""
     ukf = _ukf()
     ukf.x[:2] = [5.0, 1.0]
     ukf.p = np.eye(3) * 0.05  # nonzero spread, so sigma points aren't all coincident with the landmark
@@ -119,10 +114,8 @@ def test_filter_stays_bounded_near_truth_over_many_cycles():
 
 
 def test_heading_wraps_correctly_across_the_pi_boundary():
-    """A state estimate near +pi, corrected by a compass reading just past -pi (the
-    same real heading, wrapped) should pull toward the short way around, not spin the
-    long way through 0 -- exercises _circular_mean/the angle-aware innovation, not
-    just the ordinary in-range case every other test already uses."""
+    """A state estimate near +pi, corrected by a compass reading just past -pi (same real
+    heading, wrapped), should pull the short way around, not spin through 0 -- exercises _circular_mean."""
     ukf = _ukf(x0=(0.0, 0.0, 3.05), p0_scale=0.02)
     ukf.update_heading(-3.05)  # ~0.18 rad away the short way, ~6.1 rad the long way
     assert abs(ukf.x[2]) > 3.0  # moved toward +/-pi (the short way), not toward 0

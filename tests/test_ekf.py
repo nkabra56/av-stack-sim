@@ -18,9 +18,8 @@ def _ekf(x0=(0.0, 0.0, 0.0), p0_scale=0.05, odom_v_std=0.03, odom_delta_std=0.01
 
 
 def test_predict_only_matches_closed_form_arc():
-    """With zero odometry noise, the predicted mean should exactly match the
-    closed-form bicycle-model arc -- same check as test_vehicle's turning-radius test,
-    applied to the EKF's prediction step instead of Vehicle.update directly."""
+    """With zero odometry noise, the predicted mean should exactly match the closed-form
+    bicycle-model arc -- same check as test_vehicle's turning-radius test."""
     wheelbase = 2.7
     delta = 0.3
     v = 1.0
@@ -73,12 +72,8 @@ def test_predict_grows_covariance():
 
 
 def test_update_landmark_on_top_of_the_landmark_does_not_produce_nan():
-    """Code-review finding: the measurement Jacobian divides by range_pred (1/range)
-    and q (1/range^2), unguarded -- if the estimate ever lands exactly on (or within a
-    mm of) a mapped landmark, both blow up toward Inf/NaN and permanently poison the
-    state via `self.x = self.x + k @ innovation`, with no recovery path. Skipping the
-    update in that degenerate case (there's no real bearing information to a point
-    you're standing on anyway) is what closes it."""
+    """Code-review finding: the measurement Jacobian divides by range_pred and q, unguarded
+    -- landing exactly on a landmark used to blow up toward Inf/NaN with no recovery."""
     ekf = _ekf()
     ekf.x[:2] = [5.0, 1.0]
     ekf.update_landmark(0.0, 0.0, (5.0, 1.0))  # estimate sits exactly on the landmark
@@ -89,9 +84,8 @@ def test_update_landmark_on_top_of_the_landmark_does_not_produce_nan():
 
 
 def test_filter_stays_bounded_near_truth_over_many_cycles():
-    """Simulate a vehicle driving straight with noisy odometry (dead reckoning) and
-    periodic compass + position corrections; the filter's estimate should track true
-    state within a modest bound throughout, not just "run without crashing"."""
+    """Simulate a vehicle driving straight with noisy odometry and periodic corrections;
+    the estimate should track true state within a modest bound, not just "run without crashing"."""
     rng = np.random.default_rng(7)
     wheelbase = 2.7
     v, delta, dt = 1.0, 0.0, 0.1
@@ -137,11 +131,8 @@ def _speed_ekf(x0=(0.0, 0.0, 0.0, 20.0), p0_scale=0.05, accel_std=0.15, r_speed=
 
 
 def test_3state_ekf_behavior_is_unchanged_by_the_4state_extension():
-    """The generalization of _apply_update/update_heading/update_position/
-    update_landmark to be dimension-agnostic (len(self.x) instead of a hardcoded 3)
-    must produce numerically identical results for the original 3-state case --
-    this is the regression guard for that refactor, on top of the unchanged
-    KITTI-validation RMSE already checked manually."""
+    """Generalizing _apply_update/update_heading/update_position/update_landmark to be
+    dimension-agnostic must produce identical results for the original 3-state case."""
     ekf = _ekf(p0_scale=1.0)
     ekf.predict(v=1.0, delta=0.2, dt=0.1)
     ekf.update_heading(0.05)
@@ -151,13 +142,8 @@ def test_3state_ekf_behavior_is_unchanged_by_the_4state_extension():
 
 
 def test_predict_with_speed_state_matches_closed_form_constant_acceleration():
-    """v update (v += accel*dt each step) is exact for constant acceleration -- Euler
-    integration of a linear ODE has no discretization error. x update (x += v_new*dt,
-    where v_new is *this step's already-updated* speed -- matching Vehicle.update()'s
-    own convention, see predict_with_speed_state's docstring) is a right-Riemann-sum
-    approximation of the true integral, so it systematically overshoots for
-    accelerating motion -- same Euler-discretization tolerance test_vehicle.py's
-    turning-radius test already needs for the same underlying reason, not a bug."""
+    """v update (v += accel*dt) is exact for constant acceleration. x update uses this
+    step's already-updated speed, a right-Riemann-sum approximation that overshoots -- not a bug."""
     dt = 0.1
     accel = 2.0
     ekf = _speed_ekf(x0=(0.0, 0.0, 0.0, 10.0), accel_std=0.0)
@@ -180,9 +166,8 @@ def test_update_speed_reduces_covariance():
 
 
 def test_speed_state_stays_bounded_near_truth_over_many_cycles():
-    """Same style of check as test_filter_stays_bounded_near_truth_over_many_cycles,
-    for the 4-state speed-estimating mode: predict on noisy acceleration, correct on
-    a noisy speedometer, verify the fused estimate tracks true speed."""
+    """Same style of check as test_filter_stays_bounded_near_truth_over_many_cycles, for
+    the 4-state mode: predict on noisy acceleration, correct on speedometer, verify tracking."""
     rng = np.random.default_rng(11)
     dt = 0.1
     accel_std, speedometer_std = 0.15, 0.2

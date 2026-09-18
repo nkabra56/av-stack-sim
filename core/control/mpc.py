@@ -1,18 +1,5 @@
-"""Short-horizon nonlinear MPC path tracker. See DESIGN.md section 7.
-
-Each call optimizes a control sequence (v_k, delta_k) for k=0..horizon-1 by rolling
-out the (nonlinear) kinematic bicycle model and minimizing tracking error against a
-reference slice of the path, plus control-effort and smoothness penalties, subject to
-speed/steering bounds -- a direct-shooting nonlinear program solved with SLSQP. Only
-the first control of the optimized sequence is applied (receding horizon); the next
-call re-optimizes from the new state, warm-started from the previous solution shifted
-by one step.
-
-Rolling out the true nonlinear model (rather than linearizing around the reference,
-as a linear MPC would) avoids deriving/maintaining a Jacobian, at the cost of a
-slightly more expensive per-step solve -- an acceptable tradeoff at this horizon
-length (6-8 steps) and control rate (10 Hz).
-"""
+"""Short-horizon nonlinear MPC path tracker: rolls out the true kinematic bicycle model
+(no linearization) and solves with SLSQP, receding-horizon, warm-started. See DESIGN.md section 7."""
 
 import numpy as np
 from scipy.optimize import minimize
@@ -94,12 +81,8 @@ class MPCController:
             bounds=bounds,
             options={"maxiter": self.maxiter, "ftol": 1e-4},
         )
-        # SLSQP's bounds are structurally enforced even on non-convergence, so `result.x`
-        # is never out-of-actuator-range -- but an unconverged solve can still be a
-        # poor, even oscillatory command chosen from too few iterations. Falling back to
-        # `u0` (last tick's plan, shifted) rather than trusting a fresh unvalidated
-        # solve is strictly safer and costs nothing: it's exactly what this tick would
-        # have warm-started from anyway.
+        # SLSQP's bounds are structurally enforced even on non-convergence, but an
+        # unconverged solve can still be poor -- fall back to last tick's warm-started plan.
         u = result.x if result.success else u0
 
         shifted = np.roll(u, -2)

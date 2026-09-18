@@ -1,20 +1,5 @@
-"""Validates estimation/ekf.py against a real driven trajectory (KITTI Odometry
-ground truth) instead of only synthetic noise. See DESIGN.md's "Validation against
-real data" section.
-
-Reuses ExtendedKalmanFilter unmodified. KITTI has no recorded steering angle, only
-speed and yaw rate, so each step's true (v, yaw_rate) is converted to the (v, delta)
-the EKF's bicycle-model predict() expects via the inverse relation
-delta = atan2(wheelbase * yaw_rate, v) -- a pure adapter, not a second process model.
-Noise (odom_v_std, odom_delta_std, compass_std, position_std, position_fix_period) uses
-the exact same defaults as SensorNode/VehicleNode, so this is the same filter under the
-same noise assumptions used everywhere else in the project, just against a real curved
-trajectory instead of a synthetic one.
-
-Runs two passes over the same noisy odometry stream: the EKF (predict + corrections)
-and dead-reckoning-only (predict only) -- the natural "what would happen without the
-filter's corrections" baseline, and the basis for this module's core claim.
-"""
+"""Validates estimation/ekf.py against real KITTI Odometry ground truth, comparing the EKF
+against a dead-reckoning-only baseline. See DESIGN.md's "Validation against real data" section."""
 
 import argparse
 from dataclasses import dataclass

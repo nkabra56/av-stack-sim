@@ -1,12 +1,5 @@
-"""Smoke test for the training pipeline itself -- confirms PPO can actually train on
-ParkingEnv end to end (model construction, rollout collection, policy update, model
-save/load) without crashing. Deliberately NOT a convergence test: a few thousand
-timesteps is nowhere near enough for PPO to learn to park, and asserting a trained
-policy's success rate here would make this test either take a very long time or be
-testing noise. Real, measured policy performance lives in
-core/validation/rl_comparison.py / tests/test_rl_comparison.py instead, run against a
-policy trained for real outside the fast test suite.
-"""
+"""Smoke test for the training pipeline: confirms PPO can train on ParkingEnv end to end
+without crashing. Deliberately not a convergence test -- see test_rl_comparison.py for real numbers."""
 
 import pytest
 

@@ -1,8 +1,5 @@
 """Fast, deterministic unit coverage for ParkingEnv's Gym contract and reward shape --
-no training involved (that's core/rl/train.py / test_rl_training.py's job). Requires
-the `rl` optional dependency group (gymnasium) -- skipped entirely if unavailable, the
-same pattern any optional-dependency test suite uses.
-"""
+no training (see test_rl_training.py). Skipped if the `rl` optional dependency is unavailable."""
 
 import numpy as np
 import pytest
@@ -37,9 +34,8 @@ def test_driving_straight_toward_the_goal_gives_positive_reward():
 
 
 def test_driving_straight_into_a_flanking_obstacle_collides_and_penalizes_heavily():
-    """Places the vehicle directly facing an obstacle at close range, rather than
-    relying on some chosen action sequence happening to steer into one -- direct and
-    unambiguous, not dependent on this scenario's specific curvature/geometry."""
+    """Places the vehicle directly facing an obstacle at close range, rather than relying
+    on an action sequence happening to steer into one -- direct, not scenario-dependent."""
     env = ParkingEnv(scenario_name="perpendicular_flanked")
     env.reset(seed=0)
     obstacle = env._environment.obstacles[0]
@@ -73,10 +69,8 @@ def test_episode_truncates_at_max_steps_if_never_terminated():
 
 
 def test_success_uses_the_same_position_only_tolerance_as_the_baseline_harness():
-    """Regression for a specific design choice: success is position-only (matches
-    ParkingHarness.run()'s own criterion exactly), not also gated on heading -- so the
-    RL policy isn't held to a stricter bar than the planner+controller baseline is
-    when they're compared later."""
+    """Regression for a design choice: success is position-only (matches ParkingHarness's
+    criterion exactly), not also gated on heading, so RL isn't held to a stricter bar."""
     env = ParkingEnv(scenario_name="perpendicular_open")
     env.reset(seed=0)
     spot = env._environment.spot

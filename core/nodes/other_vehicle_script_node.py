@@ -1,9 +1,5 @@
-"""Publishes a scripted other-vehicle's status over the Bus each tick (H5 Phase B),
-reusing H4's existing OtherVehicleScript/OtherVehicleStatus/other_vehicle_present_from
-(core/intersection_harness.py) completely unchanged -- H4's own standalone harness
-calls the script directly since it has no Bus at all; this is the thin adapter that
-lets the same hand-authored scripts drive IntersectionControllerNode instead.
-"""
+"""Publishes a scripted other-vehicle's status over the Bus each tick (H5 Phase B) -- the
+thin adapter that lets H4's existing OtherVehicleScript drive IntersectionControllerNode."""
 
 from core.intersection_harness import OtherVehicleScript
 from core.messaging.bus import Bus

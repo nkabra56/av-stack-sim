@@ -1,35 +1,7 @@
-"""Tick-based executor for the full closed-loop highway drive: H1 (ACC) controls
-speed, H3 (Stanley) controls steering, H2's 4-state EKF fuses both, all acting on one
-real Vehicle -- the integration DESIGN.md section 12 commits to. Owns the Bus, builds
-the lead-vehicle/ego-plant/radar/speed-estimator/ACC/lane-centering nodes, drives them
-in a fixed order each tick. Mirrors AccHarness's/ParkingHarness's tick-based structure;
-kept as its own module rather than forced into a shared base with
-harness.py/highway_harness.py -- the real overlap between the three is a thin "own a
-Bus, run N nodes, collect ground truth" scaffold, not a shared node set, so a base
-class wouldn't capture the actual complexity (which nodes, in what order). Same
-reasoning highway_harness.py's own docstring already gives for staying separate from
-harness.py.
-
-Real NGSIM data throughout, and (as of KNOWN_BUGS.md's former entry 6) from the same
-lane: the lane centerline (core/data/ngsim/lane_centerline.csv) and the replayed leader
-(core/data/ngsim/excerpt_trajectories.csv, vehicle_id 2896) are both NGSIM US-101
-**lane 2**. This used to be two geometrically-overlapping-but-different-lane extracts
-(leader from lane 1) -- real data, same road and location, but not lane-precise, a
-deliberate scope call at the time since exercising ACC+Stanley composition on one
-Vehicle didn't strictly require lane-level realism. Closed by re-extracting a lane-2
-leader/follower pair (vehicle_id 2896/2903) via the same public Socrata source -- see
-core/data/ngsim/ATTRIBUTION.md for the full extraction account.
-
-**A real finding from re-validating against the new pair**: this leader's real recorded
-trajectory includes a genuine full stop (real US-101 congestion, not synthetic), and
-restarting from that near-zero true speed measurably (if temporarily) stresses the
-composed EKF/Stanley loop -- Stanley's atan2(k*cte, speed) correction (lane_centering.py)
-is deliberately weakest exactly when speed is lowest, so a transient lateral drift while
-pulling away from a dead stop is expected, not a bug. Confirmed genuinely transient, not
-a failure to converge, across all (controller, seed) pairs: see
-tests/test_full_highway.py's test_cross_track_error_converges_within_real_driver_scatter
-docstring for the measured numbers.
-"""
+"""Tick-based executor for the full closed-loop highway drive: H1 (ACC) controls speed,
+H3 (Stanley) controls steering, H2's EKF fuses both, all on one real Vehicle. Uses real
+NGSIM US-101 lane 2 data throughout -- see core/data/ngsim/ATTRIBUTION.md and DESIGN.md
+section 12."""
 
 from dataclasses import dataclass
 
@@ -74,8 +46,7 @@ class FullHighwaySimulationResult:
     # Phase B only (intersection_navigator given) -- None otherwise:
     states: list[IntersectionState] | None = None
     ego_stop_time: float | None = None
-    ran_stop_sign: bool | None = None  # crossed the stop line above the stop-speed
-    # threshold, never having stopped -- same definition as intersection_harness.py's
+    ran_stop_sign: bool | None = None  # crossed the stop line without stopping (see intersection_harness.py)
     proceed_time: float | None = None  # first tick state became PROCEEDING
 
 
@@ -119,10 +90,8 @@ class FullHighwayHarness:
 
         ego_start_s = lead_position[0] - lead_length - ego_initial_gap
         x0, y0, theta0 = pose_at_arc_length(ego_start_s, centerline, self.arc_length_table)
-        # Offsetting straight in y approximates a perpendicular lateral offset well on
-        # this real centerline's gentle curvature (~0.16 deg max heading deviation, see
-        # lane_geometry.py) -- same shortcut lane_centering_validation.py already takes
-        # against the same dataset.
+        # Offsetting straight in y approximates a lateral offset well on this centerline's
+        # gentle curvature -- same shortcut lane_centering_validation.py takes.
         vehicle = Vehicle(
             x=x0, y=y0 + ego_initial_lateral_offset, theta=theta0, wheelbase=wheelbase, max_steer=max_steer
         )
@@ -139,10 +108,8 @@ class FullHighwayHarness:
             x0=np.array([vehicle.x, vehicle.y, vehicle.theta, lead_speed[0]]),
             p0=np.diag([1.0, 1.0, 0.1, 0.5]),
             wheelbase=wheelbase,
-            odom_v_std=0.0,  # unused (predict() is parking-only; this mode uses predict_with_speed_state)
-            odom_delta_std=steering_odom_std,  # now load-bearing: feeds predict_with_speed_state's
-            # process noise for how steering-reading uncertainty propagates into theta/x/y (see
-            # ekf.py's predict_with_speed_state docstring) -- NOT unused the way H1-standalone's is.
+            odom_v_std=0.0,  # unused: predict() is parking-only, this mode uses predict_with_speed_state
+            odom_delta_std=steering_odom_std,  # load-bearing here -- see ekf.py's predict_with_speed_state
             r_heading=compass_std**2,
             r_position=np.eye(2) * position_std**2,
             r_landmark=np.eye(2),  # unused (update_landmark never called in this mode)
@@ -154,12 +121,8 @@ class FullHighwayHarness:
             self.bus, StanleyController(wheelbase=wheelbase, k=stanley_k, max_steer=max_steer), centerline
         )
 
-        # Phase B: when an IntersectionNavigator is given, ACC's accel becomes a
-        # candidate (not the final command) composed with the intersection's own
-        # candidate via LongitudinalArbiterNode's min() -- see that node's docstring
-        # for why this composition is sound. Phase A (no navigator) is completely
-        # unaffected: AccControllerNode publishes "longitudinal_cmd" directly, same as
-        # before this parameter existed.
+        # Phase B: with an IntersectionNavigator, ACC's accel becomes a candidate composed
+        # with the intersection's via LongitudinalArbiterNode's min() (see its docstring).
         self.intersection_node = None
         self.other_vehicle_node = None
         self.arbiter_node = None

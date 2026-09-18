@@ -1,21 +1,5 @@
-"""Perception node: the only node besides the harness allowed to see true_state.
-Publishes obstacle ranges (for braking), an always-on noisy compass, a low-rate noisy
-position fix, and opportunistic noisy landmark range-bearing readings against the
-environment's known obstacles. See DESIGN.md's EKF design section for why each of
-these three measurement types exists.
-
-**Dropout/latency** (DESIGN.md section 10's future-extensions list): real sensors
-don't just add noise to every reading, they sometimes miss a cycle entirely or
-deliver late. `dropout_prob` independently drops each of this tick's four messages
-before publishing (never arrives at all -- the EKF simply doesn't correct that tick,
-and ControllerNode/PlannerNode keep acting on whatever they last received, exactly the
-same "stale reading persists" behavior a real subscriber sees from a real dropped
-message). `latency_ticks` instead queues a survived message and releases it
-`latency_ticks` ticks later, in the order it was computed -- modeling a late arrival
-rather than a lost one. Both default to 0/off, in which case `_publish_or_defer`
-degrades to the original unconditional `bus.publish` (`dropout_prob > 0.0` short-
-circuits the RNG draw entirely, so every existing caller's noise-sample sequence is
-byte-for-byte unchanged, not just statistically similar)."""
+"""Perception node: the only node besides the harness allowed to see true_state. Publishes
+obstacle ranges, compass, position fix, and landmark readings. See DESIGN.md's EKF design section."""
 
 import numpy as np
 
@@ -46,8 +30,8 @@ class SensorNode:
         position_fix_period: int = 10,
         landmark_range_std: float = 0.2,
         landmark_bearing_std: float = 0.03,
-        dropout_prob: float = 0.0,
-        latency_ticks: int = 0,
+        dropout_prob: float = 0.0,  # chance each message is dropped entirely this tick (DESIGN.md section 10)
+        latency_ticks: int = 0,  # ticks to delay a message's delivery, modeling a late arrival
     ):
         self.bus = bus
         self.ultrasonic = ultrasonic

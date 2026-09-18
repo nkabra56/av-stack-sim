@@ -1,10 +1,5 @@
-"""Tick-based executor for H1/H2 (ACC + fused ego speed): owns the Bus, builds the
-longitudinal-mode nodes, drives them in a fixed order each tick, records ground truth
-for evaluation. Mirrors harness.py's tick-based structure but for the straight-line
-ACC mode -- kept as a separate module rather than forcing a shared base class out of a
-single existing pattern; worth consolidating once H3 (lane centering) shows what's
-actually common between the two harnesses. See DESIGN.md's ACC section.
-"""
+"""Tick-based executor for H1/H2 (ACC + fused ego speed): mirrors harness.py's tick
+structure for the straight-line ACC mode. See DESIGN.md's ACC section."""
 
 from dataclasses import dataclass
 
@@ -70,9 +65,8 @@ class AccHarness:
         ekf = ExtendedKalmanFilter(
             x0=np.array([ego_start_position, 0.0, 0.0, ego_initial_speed]),
             p0=np.diag([1.0, 1.0, 0.1, 0.5]),
-            wheelbase=2.7,  # unused here (H1-standalone never publishes steering_odometry, so
-            # SpeedEstimatorNode's delta stays 0.0 -- see speed_estimator_node.py); load-bearing
-            # once real steering flows in via the full closed-loop drive (core/full_highway_harness.py)
+            wheelbase=2.7,  # unused: H1-standalone never publishes steering_odometry
+            # (see speed_estimator_node.py); load-bearing once full_highway_harness.py flows steering in
             odom_v_std=0.0,
             odom_delta_std=0.0,
             r_heading=1.0,  # unused (update_heading never called in this mode)

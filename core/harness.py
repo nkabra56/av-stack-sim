@@ -1,16 +1,5 @@
 """Tick-based executor: owns the Bus, builds all 5 nodes, and drives them in a fixed
-order each tick. Replaces ParkingSimulation's direct-call loop. See DESIGN.md's
-architecture section for the node/topic diagram and why tick order is what it is.
-
-Per tick: VehicleNode applies the previous tick's control and publishes true_state +
-odometry (which synchronously triggers an EKF predict, which -- on the very first tick
--- also triggers PlannerNode to plan once). Then SensorNode publishes obstacle ranges
-and whichever of compass/position_fix/landmark_bearings are due this tick, each
-synchronously triggering further EKF corrections. Only then does ControllerNode
-compute a single control_cmd for the *next* tick, off the freshest pose_estimate
-available. Success/collision are evaluated against true_state only -- the harness is
-the one place, besides SensorNode, allowed to see ground truth.
-"""
+order each tick. See DESIGN.md's architecture section for the node/topic diagram."""
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -30,11 +19,8 @@ from core.nodes.vehicle_node import VehicleNode
 from core.sensors import UltrasonicArray
 from core.vehicle import Vehicle
 
-# Front cone (+/-0.6 rad either side of heading) plus a mirrored rear cone (same fan,
-# rotated 180 degrees by construction rather than separately hand-typed, so the two
-# cones can't drift out of symmetry) -- added so ControllerNode's speed governor
-# (controller_node.py's module docstring) can actually see obstacles behind the
-# vehicle during reverse-gear maneuvers, not just in front of it.
+# Front cone plus a mirrored rear cone, so ControllerNode's speed governor can see
+# obstacles behind the vehicle during reverse maneuvers too.
 _FRONT_SENSOR_ANGLES = [-0.6, -0.3, 0.0, 0.3, 0.6]
 DEFAULT_SENSOR_ANGLES = _FRONT_SENSOR_ANGLES + [angle + np.pi for angle in _FRONT_SENSOR_ANGLES]
 
@@ -48,14 +34,9 @@ class SimulationResult:
     success: bool
     collision: bool
     path: np.ndarray = field(repr=False, default=None)  # planned (M, 3) path, for plotting
-    sensor_ranges: np.ndarray = field(repr=False, default=None)  # (N, num_beams) ultrasonic
-    # readings at each tick, column order matching sensor_angles -- for M5's live sensor
-    # readings panel (visualization/animate.py). A beam that saw nothing reads max_range,
-    # same "no different from far away" convention obstacle_ranges itself already uses.
-    sensor_angles: np.ndarray = field(repr=False, default=None)  # (num_beams,) rad, relative
-    # to vehicle heading -- DEFAULT_SENSOR_ANGLES below unless the harness was built with
-    # a different UltrasonicArray.
-    dt: float = 0.1  # seconds per tick, for the speed-profile panel's time axis
+    sensor_ranges: np.ndarray = field(repr=False, default=None)  # (N, num_beams); max_range = no hit
+    sensor_angles: np.ndarray = field(repr=False, default=None)  # (num_beams,) rad, relative to heading
+    dt: float = 0.1  # seconds per tick
 
 
 class ParkingHarness:
@@ -70,33 +51,13 @@ class ParkingHarness:
         v_max: float = 1.5,
         a_max: float = 0.8,
         k_acc: float = 2.0,
-        tol: float = 0.4,  # looser than the pre-estimation baseline (0.3): the vehicle now
-        # only ever knows its NOISY pose estimate, not ground truth, so "close enough to
-        # call it parked" has to allow for realistic estimation error, not just controller error
+        tol: float = 0.4,  # allows for pose-estimate error, not just controller error
         stopping_buffer: float = 0.5,  # see ControllerNode._safe_speed's docstring
         max_replans: int = 3,  # see PlannerNode's docstring
-        tracked_buffer_extra: float = 0.4,  # see ControllerNode's "Tracking-aware buffer"
-        # docstring entry (KNOWN_BUGS.md entry 3): real stopping margin *above* whatever
-        # clearance the active planner guarantees while accurately tracked, not the
-        # planner's raw safety_margin itself (that would leave zero margin for the same
-        # sense-decide-act latency stopping_buffer already has to absorb). Paired with
-        # ControllerNode's default `tracking_threshold=0.03` in a real parameter sweep
-        # (tests/test_replanning.py). Raised from 0.3 (the original smallest/safest value
-        # found) to 0.4 after `_effective_buffer`'s cross-track measurement was fixed to
-        # use true perpendicular-to-segment distance instead of nearest-waypoint distance
-        # (a code-review finding, not an entry-3 finding): the more accurate, generally
-        # *smaller* measurement classifies more ticks as "tracking," using the smaller
-        # buffer more often -- and 0.3 turned out to have essentially no margin left, a
-        # 25-seed re-sweep found 1/10 real collisions at 0.3 that a narrower 5-seed check
-        # didn't surface (and 0.2 fails outright, 4/5 collisions -- confirming this
-        # constant sits right at a real safety cliff, not a comfortable margin above one).
-        # 0.4 held 0/25 collisions with 23/25 full completions across seeds 1-25 (the 2
-        # non-completions are the already-documented max_replans residual, not unsafe).
+        tracked_buffer_extra: float = 0.4,  # margin above the tracked planner's safety_margin;
+        # see KNOWN_BUGS.md entry 3 for the seed-sweep history behind this value.
         tracking_threshold: float = 0.03,  # see ControllerNode's constructor docstring
-        sensor_dropout_prob: float = 0.0,  # see SensorNode's module docstring (DESIGN.md
-        # section 10's sensor dropout/latency future-extension). 0.0 (default) is exactly
-        # the pre-existing behavior -- every measurement always arrives, same as before
-        # this parameter existed.
+        sensor_dropout_prob: float = 0.0,  # see SensorNode's module docstring; 0.0 keeps old behavior
         sensor_latency_ticks: int = 0,
     ):
         self.environment = environment
@@ -114,12 +75,8 @@ class ParkingHarness:
         self.sensor_angles = np.array(ultrasonic.angles)
         self._sensor_max_range = ultrasonic.max_range
 
-        # Only planners that actually guarantee an obstacle clearance while being tracked
-        # (HybridAStarPlanner's `safety_margin`) earn a smaller tracked-buffer; planners with
-        # no such attribute (DubinsPlanner/ReedsSheppPlanner, both obstacle-blind) get None,
-        # which disables the feature entirely and keeps ControllerNode's fully conservative
-        # `stopping_buffer` for any proximity, tracked or not -- see ControllerNode's
-        # "Tracking-aware buffer" docstring entry.
+        # Only planners with a `safety_margin` (HybridAStarPlanner) earn a smaller tracked
+        # buffer; obstacle-blind planners (Dubins/ReedsShepp) get None, disabling the feature.
         planner_margin = getattr(planner, "safety_margin", None)
         tracked_stopping_buffer = planner_margin + tracked_buffer_extra if planner_margin is not None else None
 
@@ -137,9 +94,8 @@ class ParkingHarness:
         )
         self.estimator_node = EstimatorNode(self.bus, ekf, environment)
         self.planner_node = PlannerNode(self.bus, planner, environment, vehicle.turning_radius, max_replans=max_replans)
-        # Worst-case gap erosion during an in-flight obstacle_ranges reading -- see
-        # ControllerNode's `latency_margin` docstring. Zero (unchanged behavior) unless
-        # sensor_latency_ticks is actually enabled.
+        # Worst-case gap erosion during an in-flight sensor reading; see ControllerNode's
+        # latency_margin docstring. Zero unless sensor_latency_ticks is enabled.
         latency_margin = sensor_latency_ticks * dt * v_max
         self.controller_node = ControllerNode(
             self.bus, controller, a_max=a_max, stopping_buffer=stopping_buffer,
@@ -147,10 +103,8 @@ class ParkingHarness:
             latency_margin=latency_margin,
         )
 
-        # A controller with its own internal rollout model (e.g. MPCController) has to predict
-        # forward using the *actual* tick length, or its predictions silently desync from the
-        # real simulation step -- the harness's dt is the single source of truth, not whatever
-        # default the controller happened to be constructed with.
+        # A controller with its own rollout model must predict using the harness's actual
+        # dt, not whatever default it was constructed with.
         if hasattr(controller, "dt"):
             controller.dt = dt
 
@@ -182,13 +136,8 @@ class ParkingHarness:
         return False
 
     def run(self, max_steps: int = 500, on_tick: Callable[[int], None] | None = None) -> SimulationResult:
-        """`on_tick(tick)`, if given, runs before each tick's nodes step -- its only use
-        so far is tests exercising re-planning (KNOWN_BUGS.md entry 3): mutating
-        `self.environment.obstacles` mid-run to simulate an obstacle that wasn't there
-        when `PlannerNode` made its first (and, for every scenario this project ships,
-        only) plan. Every node reads `self.environment` live, not a snapshot, so this is
-        the only hook needed -- no separate "inject an obstacle" API on the harness
-        itself."""
+        """`on_tick(tick)`, if given, runs before each tick -- used by re-planning tests to
+        mutate `self.environment.obstacles` mid-run (KNOWN_BUGS.md entry 3)."""
         true_history: list[tuple[float, float, float]] = []
         est_history: list[tuple[float, float, float]] = []
         cov_history: list[np.ndarray] = []

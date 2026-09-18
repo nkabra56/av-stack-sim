@@ -1,27 +1,5 @@
-"""Wraps the 4-state [x, y, theta, v] EKF (H2, estimation/ekf.py's
-predict_with_speed_state/update_speed) for the highway mode: predicts on noisy
-acceleration odometry, corrects on the noisy speedometer, republishes the fused pose
-+ speed estimate. See DESIGN.md section 12.
-
-x/y/theta stay near zero and degenerate for H1-only use (straight-line, no steering)
--- they become meaningful once H3 (lane centering) reintroduces real lateral motion,
-which is exactly why the full closed-loop drive feeds this node a real steering
-reading (see _on_steering_odometry) instead of leaving `delta` hardcoded at 0.0 the
-way H1-standalone use does. Reusing the same 4-state filter now, even though two of
-its dimensions are degenerate for H1 alone, avoids building a separate linear
-speed-only filter that would just get thrown away once H3 needs the full state
-anyway.
-
-Also corrects on compass/position_fix when published (H1-standalone never publishes
-either, so these handlers are simply never called there) -- a real gap found while
-building the full closed-loop drive: with no absolute correction at all, x/y/theta is
-pure dead reckoning, and realistic steering-odometry noise accumulates into real,
-meaningful drift over a long run once Stanley is actually closing the loop on the
-estimate (see ekf.py's predict_with_speed_state docstring for the two related EKF
-fixes this also needed). Reuses update_heading/update_position unchanged -- exactly
-the reuse H2's own original design already anticipated by generalizing them to
-len(self.x) instead of a hardcoded 3.
-"""
+"""Wraps the 4-state [x, y, theta, v] EKF (H2) for the highway mode: predicts on noisy
+accel odometry, corrects on speedometer/compass/position_fix. See DESIGN.md section 12."""
 
 from core.estimation.ekf import ExtendedKalmanFilter
 from core.messaging.bus import Bus
@@ -40,9 +18,8 @@ class SpeedEstimatorNode:
         self.bus = bus
         self.ekf = ekf
         self.dt = dt
-        self._last_delta = 0.0  # H1-standalone never publishes steering_odometry, so
-        # this stays 0.0 (the old hardcoded behavior) unless something does -- the full
-        # closed-loop drive's HighwayVehicleNode publishes a real noisy reading each tick.
+        self._last_delta = 0.0  # stays 0.0 unless steering_odometry is published (only
+        # the full closed-loop drive's HighwayVehicleNode does; H1-standalone never does)
         bus.subscribe("steering_odometry", self._on_steering_odometry)
         bus.subscribe("accel_odometry", self._on_accel_odometry)
         bus.subscribe("speedometer", self._on_speedometer)

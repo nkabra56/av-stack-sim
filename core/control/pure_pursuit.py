@@ -1,6 +1,4 @@
-"""Geometric Pure Pursuit path tracker, with automatic forward/reverse selection.
-See DESIGN.md section 7.
-"""
+"""Geometric Pure Pursuit path tracker, with automatic forward/reverse selection. See DESIGN.md section 7."""
 
 import numpy as np
 
@@ -22,11 +20,8 @@ class PurePursuitAdaptive:
         dists = np.hypot(path[:, 0] - pose.x, path[:, 1] - pose.y)
         nearest = int(np.argmin(dists))
 
-        # Search forward from the nearest point, not from index 0: scanning the whole
-        # array for "distance >= lookahead" re-selects the path's start point once the
-        # vehicle is more than `lookahead` past it (it's far away again, just behind
-        # instead of ahead), yanking the target backward. This was the root cause of
-        # the original prototype's "makes bigger circles" bug.
+        # Search forward from the nearest point, not index 0 -- scanning the whole array
+        # re-selects the path's start point once the vehicle is past it, yanking the target back.
         ahead = np.where(dists[nearest:] >= self.lookahead)[0]
         target_idx = nearest + ahead[0] if len(ahead) else len(path) - 1
         target_x, target_y = path[target_idx, :2]

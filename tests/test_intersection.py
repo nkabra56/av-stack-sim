@@ -7,9 +7,8 @@ from core.intersection_harness import (
     run_intersection_scenario,
 )
 
-# Hand-authored scenarios (same pattern as the parking side's obstacle scenarios --
-# not derived from a real dataset, since the point is exercising specific right-of-way
-# logic branches, not real-world realism).
+# Hand-authored scenarios (same pattern as the parking side's obstacle scenarios -- the
+# point is exercising specific right-of-way branches, not real-world realism).
 
 
 def test_never_runs_the_stop_sign_alone():

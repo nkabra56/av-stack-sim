@@ -1,19 +1,6 @@
-"""Rule-based right-of-way navigator for a stop-sign-controlled intersection (H4).
-See DESIGN.md section 12's H4 entry.
-
-Deliberately reuses IDMController rather than inventing new longitudinal control: the
-stop line is modeled as a stationary virtual lead vehicle (lead_speed=0) at a fixed
-position, so "decelerate smoothly and stop behind it" is exactly the car-following
-behavior IDM already does and H1/H2 already validated (including the standstill case
-specifically, from real NGSIM stop-and-go traffic) -- H4 is mostly the *reasoning*
-about when it's this vehicle's turn, wired on top of control that already exists.
-
-Scope: models the intersection as a single conflict point two independent approaches
-share, not full 2D multi-direction intersection geometry -- this captures the actual
-substance of right-of-way reasoning (mutual exclusion + arrival-order priority) without
-needing to simulate a full 4-way intersection's road geometry, consistent with how H1
-stayed longitudinal-only and H3 wasn't yet combined with H1.
-"""
+"""Rule-based right-of-way navigator for a stop-sign intersection (H4). Reuses IDMController
+for longitudinal control -- the stop line is a stationary virtual lead vehicle. See DESIGN.md
+section 12."""
 
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -29,9 +16,8 @@ class IntersectionState(Enum):
 
 @dataclass
 class OtherVehicleStatus:
-    """What the ego can observe about one other vehicle at the intersection --
-    analogous to a landmark reading: known facts about the world, not the other
-    vehicle's own internal state."""
+    """What the ego can observe about one other vehicle -- known facts about the world,
+    not the other vehicle's own internal state."""
 
     stopped: bool
     stop_time: float | None
@@ -53,9 +39,8 @@ class IntersectionNavigator:
         self.stop_speed_threshold = stop_speed_threshold
         self.state = IntersectionState.APPROACHING
         self.stop_time: float | None = None
-        # s0 (min standstill gap) set to stop_gap: the "stop line" virtual lead vehicle
-        # sits at stop_line_position, so IDM naturally settles with the ego stop_gap
-        # meters short of it, same equilibrium behavior already validated in H1/H2.
+        # s0=stop_gap: the stop line is a virtual lead vehicle, so IDM naturally settles
+        # stop_gap meters short of it.
         self._approach_idm = IDMController(v0=v_cruise, s0=stop_gap, time_headway=0.5, a_max=2.0, b_comfortable=2.5)
         self._cruise_idm = IDMController(v0=v_cruise, a_max=2.0)
 

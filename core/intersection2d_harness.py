@@ -1,25 +1,5 @@
-"""Runs several real vehicles -- each an unmodified `IntersectionNavigator` instance
-(control/intersection.py), one per approach, same reuse principle H4 itself already used
-for `IDMController` -- through one shared, real 2D intersection. See KNOWN_BUGS.md entry
-4 / intersection_geometry.py's module docstring: `intersection_harness.py` (H4's own
-standalone harness) only ever drives one ego against a single *scripted*
-`OtherVehicleStatus`, never real multi-vehicle 2D geometry -- this is what actually
-closes that gap, by deriving every `OtherVehicleStatus` other vehicles see from another
-vehicle's own real, independently-simulated navigator and position instead of a hand-
-authored script, and checking real circle-to-circle proximity between vehicles' actual
-(x, y) positions instead of trusting the arrival-order bookkeeping alone.
-
-**Turning movements**: a vehicle with `turn != "straight"` drives its entry approach's
-straight lane, then a real curved connector (`intersection_geometry.build_turn_path`),
-then the exit approach's straight lane -- one continuous route parametrized by
-cumulative distance traveled, walked exactly like a straight-through vehicle's simpler
-one-phase route. Left turns additionally yield to oncoming (opposite-approach)
-straight-through traffic that hasn't cleared yet, regardless of arrival order -- the one
-real-world right-of-way rule `IntersectionNavigator`'s arrival-order model can't express
-on its own, added here as an extra `OtherVehicleStatus` entry with a guaranteed-earliest
-`stop_time` rather than by modifying `IntersectionNavigator` itself (same "compose, don't
-modify a validated component" principle the rest of this project already follows).
-"""
+"""Runs several real IntersectionNavigator instances, one per approach, through one shared
+2D intersection, with real circle-to-circle collision checks. See KNOWN_BUGS.md entry 4."""
 
 from dataclasses import dataclass, field
 
@@ -45,17 +25,14 @@ class VehicleSpec:
     start_distance: float = 100.0  # meters behind the conflict zone at t=0
     initial_speed: float | None = None  # defaults to v_cruise if None
     turn: Turn = "straight"
-    turning_radius: float = 4.0  # only used if turn != "straight" -- see build_turn_path. Must
-    # satisfy TURN_LEAD_RATIO * turning_radius <= conflict_half_width + stop_margin (see
-    # run_multi_approach_scenario) or a stopped turning vehicle ends up geometrically mid-curve
-    # instead of on its straight entry lane -- KNOWN_BUGS.md entry 4.
+    turning_radius: float = 4.0  # only used if turn != "straight"; must satisfy
+    # TURN_LEAD_RATIO * turning_radius <= conflict_half_width + stop_margin (KNOWN_BUGS.md entry 4)
 
 
 @dataclass(frozen=True)
 class _Route:
-    """Precomputed once per vehicle at scenario setup: where its (x, y, theta) is for
-    any cumulative distance `d` it's traveled, in up to 3 phases (entry-straight,
-    curve, exit-straight -- straight-through vehicles only ever use phase 1)."""
+    """Precomputed per vehicle: (x, y, theta) at any cumulative distance `d` traveled,
+    across up to 3 phases (entry-straight, curve, exit-straight)."""
 
     exit_approach: Approach
     pre_curve_length: float | None  # None for straight-through (no curve phase at all)
@@ -98,19 +75,8 @@ def _pose_at(spec: VehicleSpec, route: _Route, d: float) -> tuple[float, float, 
 def _clear_distance(spec: VehicleSpec, route: _Route, conflict_half_width: float, clear_margin: float) -> float:
     if spec.turn == "straight":
         return spec.start_distance + conflict_half_width + clear_margin
-    # The curve is genuinely longer than the straight-line chord it replaces (see
-    # intersection_geometry.py's TURN_LEAD_RATIO comment), so the straight-through
-    # formula above would declare a turning vehicle "cleared" before it's actually
-    # finished the curve -- use the curve's own real endpoint instead.
-    #
-    # But the curve's endpoint alone isn't necessarily far enough: at that point the
-    # vehicle is only `turn_lead` past the conflict-zone *center* along the exit
-    # approach, not necessarily past the box's edge (`conflict_half_width`) at all --
-    # for a small enough turning_radius, `turn_lead < conflict_half_width` and the
-    # curve's own endpoint still sits inside the box. Require the same real physical
-    # margin past the box's edge the straight-through formula requires
-    # (`conflict_half_width + clear_margin`, measured from center along the exit
-    # direction), not just "finished the curve" -- whichever is farther.
+    # A turning vehicle isn't "cleared" until past the curve's real endpoint, and that
+    # alone isn't always far enough past the box edge either -- take whichever is farther.
     turn_lead = TURN_LEAD_RATIO * spec.turning_radius
     extra_past_curve = max(clear_margin, conflict_half_width + clear_margin - turn_lead)
     return route.pre_curve_length + route.curve_length + extra_past_curve
@@ -148,28 +114,11 @@ def run_multi_approach_scenario(
     v_cruise: float = 15.0,
     dt: float = 0.1,
     max_steps: int = 3000,
-    navigators: list[IntersectionNavigator] | None = None,  # override, one per spec -- lets a
-    # test substitute a deliberately non-compliant navigator (e.g. one that never yields) to
-    # verify the collision check below is a real safety net and not vacuously true. Production
-    # callers never pass this; every real vehicle gets an unmodified IntersectionNavigator.
+    navigators: list[IntersectionNavigator] | None = None,  # override, one per spec -- lets tests
+    # substitute a non-compliant navigator to verify the collision check is a real safety net.
 ) -> MultiIntersectionResult:
-    # `conflict_half_width`/`stop_margin` vs. `VehicleSpec.lane_offset`/`HIGHWAY_VEHICLE_RADIUS`
-    # aren't independent: a vehicle waiting at its own stop line has to clear the *perpendicular*
-    # approach's through-lane by at least 2*HIGHWAY_VEHICLE_RADIUS, not just be outside the box.
-    # Closest approach (verified against a real simulated run while building this) is
-    # `conflict_half_width + stop_margin + IntersectionNavigator's own stop_gap(1.0) -
-    # lane_offset`; the defaults above keep that at 6.5m against the default 3.0m `lane_offset`
-    # and 2.5m `HIGHWAY_VEHICLE_RADIUS` (5.0m needed) -- a real, physical spacing requirement a
-    # single-conflict-point model never had to reason about at all.
-    #
-    # A second, independent constraint applies to turning vehicles: `_build_route` starts the
-    # curved connector `turn_lead = TURN_LEAD_RATIO * turning_radius` before the conflict zone,
-    # while `IntersectionNavigator`'s 1D stop line sits at `conflict_half_width + stop_margin`
-    # before it. If the curve starts earlier (further back) than the stop line, a *stopped*
-    # turning vehicle is already partway around the curve instead of cleanly on its straight
-    # entry lane -- a real bug found via a random mixed-turn sweep (KNOWN_BUGS.md entry 4) that
-    # produced a nonsensical waiting position and a resulting collision. Guard against silently
-    # reintroducing it.
+    # conflict_half_width/stop_margin interact with VehicleSpec.lane_offset and
+    # HIGHWAY_VEHICLE_RADIUS; the checks below guard the turning-vehicle geometry (KNOWN_BUGS.md entry 4).
     for spec in specs:
         if spec.turn == "straight":
             continue
@@ -181,12 +130,8 @@ def run_multi_approach_scenario(
                 f"({conflict_half_width + stop_margin:.1f}m) -- a stopped vehicle would already be "
                 "mid-curve. Increase conflict_half_width/stop_margin or decrease turning_radius."
             )
-        # The check above only relates turn_lead to the *box*, not to this vehicle's own
-        # start_distance -- `_build_route`'s `pre_curve_length = start_distance -
-        # turn_lead` can still go negative (or non-positive) if start_distance itself is
-        # too small, which reproduces the identical mid-curve-at-t=0 bug the check above
-        # exists to prevent, just via a different dimension. Require at least a nominal
-        # 1m of real straight lane before the curve begins.
+        # Also guard against pre_curve_length going negative via too-small start_distance --
+        # the same mid-curve-at-t=0 bug, from a different cause.
         if turn_lead >= spec.start_distance - 1.0:
             raise ValueError(
                 f"{spec.approach.name} turn={spec.turn}: turn_lead ({turn_lead:.1f}m) leaves less "
@@ -227,24 +172,9 @@ def run_multi_approach_scenario(
             for b in range(n):
                 if a == b:
                     continue
-                # A straight vehicle never yields to an *opposing* left-turner via ordinary
-                # arrival-order bookkeeping -- real-world right-of-way already gives it
-                # unconditional precedence over that specific pairing (see the
-                # phantom-blocker comment below). Omitting b's real status here (rather
-                # than including it and letting arrival order decide) is what makes that
-                # one-directional: without this, a left-turner that happened to arrive
-                # first would make the straight vehicle yield to *it* via real
-                # arrival-order, while the phantom rule below simultaneously makes the
-                # left-turner yield to the straight vehicle -- a live circular deadlock
-                # found via a random mixed-turn sweep (KNOWN_BUGS.md entry 4), fixed by
-                # ensuring the relation between an opposing left/straight pair can only
-                # ever constrain the left-turner, never the straight vehicle. Deliberately
-                # NOT extended to a=="right": the phantom rule below only ever fires for
-                # b=="straight", so a right-turner has no substitute protection against an
-                # opposing left-turner -- exempting it too (tried first) reproduced real
-                # collisions in the same sweep, since it left that pairing with no mutual-
-                # exclusion mechanism at all. Right-turners keep the normal, unmodified,
-                # already-deadlock-safe arrival-order relation against every other vehicle.
+                # A straight vehicle never yields to an opposing left-turner via arrival-order
+                # bookkeeping -- real right-of-way gives it unconditional precedence (paired with
+                # the phantom rule below); this avoided a circular deadlock (KNOWN_BUGS.md entry 4).
                 opposing_left_turner = (
                     specs[a].turn == "straight"
                     and specs[b].turn == "left"
@@ -259,28 +189,9 @@ def run_multi_approach_scenario(
                             is_to_the_right=is_to_the_right(specs[a].approach.heading, specs[b].approach.heading),
                         )
                     )
-                # Left turns yield to oncoming (opposite-approach) straight-through
-                # traffic that hasn't cleared yet, regardless of arrival order -- a real
-                # right-of-way rule IntersectionNavigator's own arrival-order model has no
-                # way to express on its own. Modeled as an extra phantom "other"
-                # guaranteed to count as having arrived first (stop_time far in the
-                # past), rather than by changing IntersectionNavigator itself.
-                #
-                # Gated on `d[b] < clear_distance[b]` alone -- deliberately NOT also
-                # requiring `navigators[b].state != APPROACHING` (tried first). That
-                # extra gate let a left-turner treat a still-APPROACHING oncoming vehicle
-                # as no threat and launch immediately, even though "still approaching"
-                # only means "hasn't reached its own stop line yet," not "far away" --
-                # it can be moving at full v_cruise and reach the conflict zone well
-                # before the left-turner finishes crossing it. Found via the same random
-                # mixed-turn sweep (KNOWN_BUGS.md entry 4): both vehicles were already
-                # PROCEEDING when they collided, because the left-turner's stop_time
-                # arrived before the oncoming vehicle had even stopped, so the state gate
-                # let it go. Position (`d[b]` vs. `clear_distance[b]`) is what actually
-                # matters, not the oncoming vehicle's own state-machine phase; this is
-                # conservative (a left-turner waits out the oncoming vehicle's entire
-                # approach, not just its time in the box) but that trade favors safety
-                # over throughput, consistent with the rest of this project.
+                # Left turns yield to oncoming straight traffic that hasn't cleared yet,
+                # regardless of arrival order -- modeled as a phantom "other" guaranteed to
+                # have arrived first. Gated on position, not navigator state (KNOWN_BUGS.md entry 4).
                 if (
                     specs[a].turn == "left"
                     and specs[b].turn == "straight"

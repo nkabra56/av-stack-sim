@@ -1,13 +1,5 @@
-"""Wraps StanleyController (control/lane_centering.py) for the full closed-loop
-highway drive: consumes the fused pose+speed estimate (EgoSpeedEstimateMsg, H2 -- not
-ground truth, same "controllers only see estimates" rule as everywhere else in this
-project) and publishes exactly one steering command per tick via an explicit step(),
-same "store latest, act once per tick" pattern as ControllerNode/AccControllerNode.
-
-EgoSpeedEstimateMsg satisfies interfaces.HasPose directly (x/y/theta), so no adapter
-is needed between the estimator and Stanley -- the same principle that already lets
-Stanley track either a real Vehicle or a parking PoseEstimateMsg unchanged.
-"""
+"""Wraps StanleyController for the full closed-loop highway drive: consumes the fused
+pose+speed estimate (H2, not ground truth) and publishes one steering command per tick."""
 
 import numpy as np
 

@@ -1,7 +1,5 @@
-"""Smoke test for the Foxglove 3D scene exporter -- confirms it runs end to end
-against a real SimulationResult and produces a non-empty .mcap file, without
-asserting anything about visual correctness (that needs a human opening the file in
-the Foxglove desktop app, see FOXGLOVE_VIZ_PLAN.md)."""
+"""Smoke test for the Foxglove 3D scene exporter -- confirms it runs end to end and
+produces a non-empty .mcap file, without asserting visual correctness (needs a human)."""
 
 import pytest
 

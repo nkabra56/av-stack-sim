@@ -1,15 +1,5 @@
-"""Wraps IntersectionNavigator (H4, control/intersection.py) for the full closed-loop
-highway drive (H5 Phase B): publishes an accel candidate for LongitudinalArbiterNode
-to compose with ACC's, same "store latest, act once per tick" pattern as every other
-controller node here. See DESIGN.md section 12's H5 entry.
-
-Feeds the navigator the FUSED pose+speed estimate (via lane_geometry.project_to_arc_length),
-not ground truth -- extending the "controllers only see estimates" rule to H4 for the
-first time. H4's own standalone harness (intersection_harness.py) uses true state
-directly, justified there by "no sensor noise happening in that mode" -- that
-justification stops applying once it's wired into a loop that has a running EKF, so
-this is a deliberate, visible choice, not an oversight.
-"""
+"""Wraps IntersectionNavigator (H4) for the full closed-loop drive (H5 Phase B): publishes
+an accel candidate for LongitudinalArbiterNode. Feeds it the FUSED estimate, not ground truth."""
 
 from core.control.intersection import IntersectionNavigator, OtherVehicleStatus
 from core.control.lane_geometry import project_to_arc_length

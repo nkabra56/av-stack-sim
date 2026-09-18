@@ -1,10 +1,5 @@
-"""Shared structural types for planners and controllers. See IMPLEMENTATION.md section 2.
-
-Planner and Controller are Protocols (not base classes) on purpose: new algorithms
-are added by writing a class with the right method signature, no shared inheritance
-required, so PlannerNode/ControllerNode (core/nodes/) never need to change when a
-new planner/controller is added -- they wrap whatever satisfies these protocols.
-"""
+"""Shared structural types for planners and controllers. Protocols, not base classes, so
+new algorithms need no shared inheritance (see IMPLEMENTATION.md section 2)."""
 
 from typing import Protocol
 
@@ -24,9 +19,8 @@ class Planner(Protocol):
 
 
 class HasPose(Protocol):
-    """Anything with .x/.y/.theta -- a real Vehicle, or (in the node architecture)
-    a PoseEstimateMsg, since controllers only ever act on the estimate, never on
-    ground truth."""
+    """Anything with .x/.y/.theta -- a real Vehicle, or a PoseEstimateMsg, since
+    controllers only ever act on the estimate, never ground truth."""
 
     x: float
     y: float

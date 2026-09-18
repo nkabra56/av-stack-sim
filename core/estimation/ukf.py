@@ -1,34 +1,6 @@
-"""Unscented Kalman Filter for [x, y, theta] pose estimation -- an alternative to
-ekf.py's EKF, built to answer DESIGN.md section 10's future-extensions question
-directly rather than just asserting it: is the EKF's linearization (a first-order
-Taylor expansion of the bicycle model / measurement functions around the current
-estimate, via `ekf.py`'s Jacobians) actually a fine approximation at the turning
-rates this project exercises, or does it just look fine because nobody compared it
-against something that doesn't linearize at all?
-
-The unscented transform answers that without linearizing: instead of propagating one
-mean + one Jacobian-derived covariance through a first-order approximation of f/h, it
-deterministically picks 2n+1 "sigma points" that exactly capture (x, P)'s mean and
-covariance, propagates each of them through the *exact* nonlinear f/h (no Taylor
-expansion at all), and reconstitutes the mean/covariance from the transformed points.
-This is a genuinely different algorithm, not a relabeled EKF -- see `_sigma_points`/
-`predict`/`_correct` -- while sharing the exact same process model (bicycle
-kinematics) and measurement models (heading/position/landmark range-bearing) `ekf.py`
-uses, so any accuracy difference measured between them is attributable to the
-propagation method, not to the two filters modeling different physics.
-
-**Scope choice**: control-input noise (odometry uncertainty in v, delta) is folded in
-as an additive process-noise term using the same input-Jacobian formula `ekf.py`'s
-`predict()` already uses (V @ M @ Vᵀ), rather than also augmenting the sigma-point
-state with the input-noise dimensions (the "fully unscented" treatment). The point
-of this comparison is whether sigma-point propagation of *existing state uncertainty*
-through the nonlinear model handles curvature better than Jacobian linearization does
--- augmenting control noise into the sigma points too would improve both filters'
-handling of input uncertainty roughly equally, so it wouldn't change what this
-comparison is actually measuring, while meaningfully complicating the implementation.
-
-See `core/validation/ukf_comparison.py` for the actual head-to-head numbers.
-"""
+"""Unscented Kalman Filter for [x, y, theta] pose estimation -- an alternative to ekf.py's
+EKF that avoids linearization via sigma points, to check whether the EKF's Jacobian
+linearization is actually a fine approximation. See core/validation/ukf_comparison.py."""
 
 import numpy as np
 
@@ -39,9 +11,8 @@ ANGLE_INDEX = 2  # theta's position in the [x, y, theta] state -- the one compon
 
 
 def _circular_mean(angles: np.ndarray, weights: np.ndarray) -> float:
-    """Weighted mean of angles, correct across the -pi/pi wrap -- a naive weighted
-    average of e.g. [3.1, -3.1] would give ~0 (wrong; the true mean is near pi/-pi),
-    exactly the failure mode sigma points spanning the wrap boundary can trigger."""
+    """Weighted mean of angles, correct across the -pi/pi wrap -- a naive average of
+    e.g. [3.1, -3.1] would give ~0 (wrong; the true mean is near pi/-pi)."""
     return float(np.arctan2(np.sum(weights * np.sin(angles)), np.sum(weights * np.cos(angles))))
 
 
@@ -80,9 +51,7 @@ class UnscentedKalmanFilter:
     def _sigma_points(self) -> np.ndarray:
         n = self._n
         # Cholesky, not a generic sqrtm: P is a covariance matrix (symmetric PSD by
-        # construction every tick), and Cholesky is the standard, cheaper choice for
-        # exactly that case -- same assumption the rest of this project already makes
-        # about P (e.g. ekf.py's own eigendecomposition-based ellipse rendering).
+        # construction), the standard cheaper choice for that case.
         sqrt_p = np.linalg.cholesky((n + self._lambda) * self.p)
         points = np.empty((2 * n + 1, n))
         points[0] = self.x
@@ -97,9 +66,8 @@ class UnscentedKalmanFilter:
             dtheta = (v / self.wheelbase) * np.tan(delta) * dt
             propagated[i] = [x + v * np.cos(theta) * dt, y + v * np.sin(theta) * dt, wrap_angle(theta + dtheta)]
 
-        # Same input-Jacobian process noise ekf.py's predict() uses -- see this
-        # module's docstring for why control-input noise isn't also folded into the
-        # sigma points themselves.
+        # Same input-Jacobian process noise ekf.py's predict() uses -- control-input noise
+        # isn't folded into the sigma points themselves (see this module's docstring).
         theta = self.x[2]
         cos_delta = np.cos(delta)
         v_jacobian = np.array(
@@ -122,12 +90,8 @@ class UnscentedKalmanFilter:
         self.p = cov
 
     def _correct(self, h, z_meas: np.ndarray, r: np.ndarray, angle_indices: tuple[int, ...] = ()) -> None:
-        """Shared correction step for all three measurement types below: propagate the
-        current sigma points through measurement function `h` (state -> predicted
-        measurement), reconstruct the predicted measurement's mean/covariance and its
-        cross-covariance with state (all angle-aware where `angle_indices` marks a
-        circular measurement component -- heading and landmark bearing), then apply
-        the standard UKF gain update."""
+        """Shared correction step for all three measurement types: propagate sigma points
+        through `h`, then apply the standard UKF gain update (angle-aware per `angle_indices`)."""
         sigma = self._sigma_points()
         z_sigma = np.array([h(point) for point in sigma])
 

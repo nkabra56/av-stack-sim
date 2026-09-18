@@ -16,14 +16,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
-# DESIGN.md section 10's "learned parking policy" future extension. Deliberately kept
-# out of the core `dependencies` list -- torch (pulled in by stable-baselines3) is a
-# multi-GB addition, and every other capability in this project runs without it. Only
-# `core/rl/` and its tests need this group.
+# DESIGN.md section 10's "learned parking policy" extension -- kept out of core deps
+# since torch (via stable-baselines3) is a multi-GB addition. Only core/rl/ needs this.
 rl = ["gymnasium", "stable-baselines3"]
-# Optional 3D visualization export (core/visualization/foxglove_export.py) as an
-# additive alternative to the default Matplotlib animation -- same "opt-in, not
-# core" rationale as `rl` above. Only core/demo.py's --foxglove flag needs this.
+# Optional 3D export (foxglove_export.py), additive to the default Matplotlib animation.
+# Only core/demo.py's --foxglove flag needs this.
 viz = ["foxglove-sdk"]
 
 [tool.setuptools.packages.find]

@@ -1,22 +1,14 @@
-"""Adaptive cruise control: two longitudinal controllers, the same "classical/reactive
-vs. optimization-based" comparison used for parking (Pure Pursuit vs. MPC) and applied
-here to car-following. See DESIGN.md's ACC section.
-
-Both share the call signature `control(ego_speed, gap, lead_speed) -> accel` -- gap is
-the bumper-to-bumper distance to the lead vehicle (meters), not center-to-center.
-"""
+"""Adaptive cruise control: two longitudinal controllers, the same classical-vs-optimization
+comparison used for parking (Pure Pursuit vs. MPC), applied to car-following. See DESIGN.md's
+ACC section. Both share `control(ego_speed, gap, lead_speed) -> accel`, gap bumper-to-bumper."""
 
 import numpy as np
 from scipy.optimize import minimize
 
 
 class IDMController:
-    """Intelligent Driver Model (Treiber, Hennecke & Helbing, 2000) -- the
-    literature-standard car-following law, closed-form and reactive like Pure Pursuit
-    was for parking. Reference parameter ranges (v0, a_max, b, s0, time_headway) are
-    from the original paper and widely-used traffic-simulation defaults (e.g. SUMO's),
-    not hand-tuned for this project specifically.
-    """
+    """Intelligent Driver Model (Treiber, Hennecke & Helbing, 2000) -- literature-standard,
+    closed-form car-following law. Default parameters are from the original paper / SUMO."""
 
     def __init__(
         self,
@@ -37,9 +29,7 @@ class IDMController:
         self.a_min = a_min
 
     def control(self, ego_speed: float, gap: float, lead_speed: float) -> float:
-        # The raw IDM interaction term (s*/gap)^2 is unbounded as gap -> 0 -- a real car
-        # can't actually decelerate at whatever multiple of a_max that implies, so the
-        # output has to be clipped to a physical limit, same as any other actuator.
+        # The raw IDM term is unbounded as gap -> 0; clip to what a real actuator can do.
         gap = max(gap, 1e-3)
         closing_speed = ego_speed - lead_speed
         s_star = self.s0 + max(
@@ -50,22 +40,9 @@ class IDMController:
 
 
 class MpcAccController:
-    """Short-horizon MPC for ACC. Unlike control/mpc.py's parking MPC, which only uses
-    box bounds on the controls, this adds a genuine nonlinear inequality constraint
-    (gap(t) >= min_gap at every step in the horizon, via scipy.optimize.minimize's
-    `constraints` argument) -- a hard safety constraint enforced by the optimizer
-    itself, not a soft cost penalty that can be traded off against tracking accuracy.
-
-    The lead vehicle is assumed to hold constant velocity over the horizon -- the
-    standard simplifying prediction used in real ACC/MPC literature; re-solved every
-    tick from the latest radar reading, so it's continuously corrected, not a
-    long-range forecast.
-
-    `min_gap` defaults to 3.0 m, not the more natural-looking 2.0 m, as extra cushion
-    against sensor noise (see `_effective_min_gap`'s docstring for the constraint-
-    feasibility fix itself -- this default is now a margin choice, not a workaround
-    for a broken constraint).
-    """
+    """Short-horizon MPC for ACC. Unlike the parking MPC (box bounds only), this adds a
+    hard nonlinear gap(t) >= min_gap constraint via SLSQP, re-solved every tick against a
+    constant-velocity lead prediction from the latest radar reading."""
 
     def __init__(
         self,
@@ -73,16 +50,8 @@ class MpcAccController:
         horizon: int = 10,
         v0: float = 30.0,
         a_max: float = 1.5,
-        a_min: float = -9.0,  # matches IDMController's physical emergency-braking floor
-        # (~1g) -- both controllers implement the identical control(ego_speed, gap,
-        # lead_speed) contract for the same plant, so a materially tighter cap here
-        # (-3.0, the old default) meant MPC-ACC could physically brake less hard than
-        # IDM under an identical hard-braking lead event, an untested asymmetry (the
-        # only test that varied lead deceleration used ~2 m/s^2, comfortably inside
-        # both). min_gap/time_headway are what keep normal-driving braking comfortable
-        # in practice; a_min is only ever reached when the gap constraint is already
-        # under real pressure and every m/s^2 of available braking matters.
-        min_gap: float = 3.0,
+        a_min: float = -9.0,  # matches IDMController's emergency-braking floor (~1g)
+        min_gap: float = 3.0,  # extra cushion above the more natural 2.0m, against sensor noise
         time_headway: float = 1.5,
         w_speed: float = 1.0,
         w_gap: float = 1.0,
@@ -124,29 +93,8 @@ class MpcAccController:
         return cost
 
     def _effective_min_gap(self, ego_speed: float, lead_positions: np.ndarray) -> np.ndarray:
-        """A per-horizon-step floor that's *always* achievable, fixing the actual defect
-        behind KNOWN_BUGS.md's entry 1: a flat `min_gap` constraint can demand something no
-        acceleration sequence can deliver (the ego closing on a stopped lead can't reverse
-        to recover lost distance), so SLSQP was solving a genuinely infeasible NLP and
-        silently returning its best constraint-violating attempt.
-
-        The gap achievable at horizon step k is bounded by braking at `a_min` from *now*
-        every step -- that specific sequence is a concrete witness that reaching
-        `_rollout(..., a_min-repeated)`'s gap at each step is always possible, so clamping
-        the constraint to never demand more than that (`min(min_gap, floor)`, per step, not
-        one scalar for the whole horizon) keeps the NLP feasible at every step instead of
-        only at whichever one is easiest. The optimizer is still free -- and, via `_cost`'s
-        `desired_gap` term, still incentivized -- to reach the full `min_gap` whenever
-        that's actually reachable; this only relaxes the constraint at the specific steps
-        where `min_gap` itself would be physically impossible.
-
-        Verified against the NGSIM standstill case (real congested stop-and-go traffic,
-        DESIGN.md section 11): cut the realized gap erosion at `min_gap=3.0` from ~0.56 m
-        to ~0.21 m, with the remainder attributable to radar range noise
-        (`RadarNode`'s `range_std=0.5`) feeding the *measured* gap the constraint is built
-        from each tick, not to any remaining infeasibility -- confirmed by comparing each
-        tick's promised next-step floor against the next tick's realized true gap.
-        """
+        """Per-step gap floor that's always achievable (braking at a_min from now), so the
+        SLSQP constraint stays feasible instead of silently violated. See KNOWN_BUGS.md entry 1."""
         _, floor = self._rollout(ego_speed, lead_positions, np.full(self.horizon, self.a_min))
         return np.minimum(self.min_gap, floor)
 
@@ -176,19 +124,8 @@ class MpcAccController:
         )
         a_seq = result.x
 
-        # Unlike the parking MPC (bounds only), this has a genuine nonlinear inequality
-        # constraint (the gap floor) that SLSQP can silently violate when it doesn't
-        # converge -- `_effective_min_gap`'s own docstring already documents this
-        # exact failure mode for the *old*, infeasible constraint; making the
-        # constraint feasible didn't add a check that the solver actually reaches a
-        # feasible point within `maxiter`. Verify directly rather than trusting
-        # `result.success` alone (SLSQP can report failure on an otherwise-fine point,
-        # or succeed near a boundary within its own tolerance) -- if the returned
-        # sequence violates the gap constraint by more than numerical slack, fall back
-        # to `_effective_min_gap`'s own feasibility witness (braking at `a_min` every
-        # step): the same concrete "this is always achievable" sequence that
-        # constraint already relies on, so it's guaranteed safe rather than merely
-        # conservative.
+        # SLSQP can silently return a constraint-violating point on non-convergence; verify
+        # directly and fall back to braking at a_min (an always-feasible witness) if so.
         if np.any(self._gap_constraint(a_seq, ego_speed, lead_positions, effective_min_gap) < -1e-3):
             a_seq = np.full(self.horizon, self.a_min)
 

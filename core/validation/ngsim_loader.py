@@ -1,20 +1,5 @@
-"""Parses NGSIM vehicle-trajectory excerpts into leader/follower trajectory pairs for
-ACC validation. See DESIGN.md's ACC section.
-
-Uses the standard library `csv` module, not pandas -- a plain filter/sort over a few
-hundred rows doesn't need a dataframe library, and the project has deliberately stayed
-dependency-light (see IMPLEMENTATION.md's dependency notes for the EKF/pub-sub and
-MPC milestones, neither of which needed a new dependency either).
-
-NGSIM's native units are feet/feet-per-second; converted to SI (meters, m/s, m/s^2)
-here so the committed CSV stays verbatim from the source (see
-core/data/ngsim/ATTRIBUTION.md) while everything downstream uses the project's
-usual units. `local_y` is the along-road (forward) coordinate. `vehicle_id`/`frame_id`
-reset across NGSIM's recording sub-periods, so `global_time` (a genuinely monotonic
-millisecond timestamp) is what identifies a single contiguous trajectory -- not
-frame_id, which this project's data-extraction step for the committed excerpt learned
-the hard way (see IMPLEMENTATION.md's known-issues log).
-"""
+"""Parses NGSIM vehicle-trajectory excerpts into leader/follower trajectory pairs for ACC
+validation. Converts native feet/fps to SI units. See DESIGN.md's ACC section."""
 
 import csv
 from dataclasses import dataclass
@@ -24,9 +9,8 @@ import numpy as np
 
 FEET_TO_METERS = 0.3048
 DEFAULT_EXCERPT_PATH = Path(__file__).parent.parent / "data" / "ngsim" / "excerpt_trajectories.csv"
-# vehicle_id 2896 (leader) / 2903 (follower), NGSIM US-101 lane 2 -- re-extracted to close
-# KNOWN_BUGS.md entry 6 (the excerpt used to be lane 1, geometrically overlapping but not
-# lane-coherent with lane_centerline.csv below, which is lane 2). See ATTRIBUTION.md.
+# vehicle_id 2896 (leader) / 2903 (follower), NGSIM US-101 lane 2 -- re-extracted to be
+# lane-coherent with lane_centerline.csv (KNOWN_BUGS.md entry 6). See ATTRIBUTION.md.
 DEFAULT_LEADER_ID = 2896
 DEFAULT_FOLLOWER_ID = 2903
 DEFAULT_LANE_CENTERLINE_PATH = Path(__file__).parent.parent / "data" / "ngsim" / "lane_centerline.csv"
@@ -55,6 +39,7 @@ def _read_rows(path: str | Path) -> list[dict]:
 
 
 def _vehicle_trajectory(rows: list[dict], vehicle_id: int) -> NgsimTrajectory:
+    # Sorted by global_time, not frame_id, which resets across NGSIM's recording sub-periods.
     vrows = sorted(
         (r for r in rows if int(r["vehicle_id"]) == vehicle_id), key=lambda r: int(r["global_time"])
     )
@@ -79,16 +64,8 @@ def load_following_pair(
     follower_rows = sorted(
         (r for r in rows if int(r["vehicle_id"]) == follower_id), key=lambda r: int(r["global_time"])
     )
-    # NGSIM's own `space_headway` is front-center-to-front-center (verified directly
-    # against this committed CSV: leader.position - follower.position matches it to
-    # sub-millimeter rounding), not the bumper-to-bumper distance `acc.py`'s
-    # controllers and `AccHarness` mean by "gap" throughout this project. Subtracting
-    # the leader's length converts it to that same convention here, once, so every
-    # downstream consumer (AccHarness's initial-position placement, acc_validation.py's
-    # mean_real_gap plausibility comparison against sim.gap) is comparing like with
-    # like -- previously this was ~lead_length (3.66m, ~20% of the true ~14.9m mean
-    # gap) too large, silently double-counting the leader's length on top of
-    # AccHarness's own (correct) `lead_position - lead_length` bumper computation.
+    # NGSIM's own space_headway is front-center-to-front-center, not the bumper-to-bumper
+    # "gap" acc.py/AccHarness mean -- subtract the leader's length to convert, once, here.
     real_space_headway = (
         np.array([float(r["space_headway"]) * FEET_TO_METERS for r in follower_rows]) - leader.length
     )
@@ -100,13 +77,8 @@ def load_following_pair(
 
 
 def load_lane_centerline(path: str | Path = DEFAULT_LANE_CENTERLINE_PATH) -> np.ndarray:
-    """Returns an (N, 3) x/y/theta path along a real, NGSIM-derived lane centerline
-    (see core/data/ngsim/ATTRIBUTION.md for how it was derived -- aggregated from
-    ~10,400 real vehicle positions, not hand-authored), in the same (N, 3) format
-    Planner.plan() returns for the parking mode, so Stanley control (control/
-    lane_centering.py) can be validated the same way parking's path-tracking
-    controllers are: given a real path, does the controller track it.
-    """
+    """Returns an (N, 3) x/y/theta path along a real NGSIM-derived lane centerline (see
+    ATTRIBUTION.md), in the same format Planner.plan() returns."""
     rows = _read_rows(path)
     position = np.array([float(r["position_m"]) for r in rows])
     lateral = np.array([float(r["lateral_offset_m"]) for r in rows])

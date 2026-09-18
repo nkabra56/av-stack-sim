@@ -1,23 +1,5 @@
-"""Validates control/lane_centering.py's Stanley controller against a real, NGSIM-
-derived lane centerline instead of a hand-authored curve. See DESIGN.md section 12's
-H3 entry.
-
-Scope note: this runs the full 2D kinematic bicycle Vehicle at a constant commanded
-speed under Stanley (lateral) control alone -- it does not yet combine with ACC
-(longitudinal control, H1/H2) in the same closed loop. That combination (a vehicle
-whose speed comes from the ACC controller and whose steering comes from Stanley,
-sharing one Vehicle) is real follow-up integration work, not built here, the same way
-H1 shipped ACC standalone before H2 extended it rather than attempting everything in
-one pass.
-
-Unlike the KITTI/NGSIM-follower validations (replaying real *time-series* data through
-an unmodified component), there's no real trajectory to replay here -- NGSIM records
-where real drivers actually were, not a reference path independent of their own
-control decisions. So this validates the controller's closed-loop tracking behavior
-(does it converge, does it stay tracking) against real drivers' own lateral scatter
-within the lane as the plausibility bar, the same "sanity check, not a strict target"
-principle the ACC validation uses.
-"""
+"""Validates control/lane_centering.py's Stanley controller against a real NGSIM-derived
+lane centerline (lateral control only, no ACC yet). See DESIGN.md section 12's H3 entry."""
 
 import argparse
 from dataclasses import dataclass
@@ -28,9 +10,8 @@ from core.control.lane_centering import StanleyController
 from core.vehicle import Vehicle
 from core.validation.ngsim_loader import load_lane_centerline
 
-# Real per-vehicle lateral positioning std within NGSIM's lane 2 before aggregation/
-# smoothing (see ATTRIBUTION.md) -- what real drivers' own scatter around the lane
-# center looks like, used as the plausibility bar below.
+# Real per-vehicle lateral positioning std within NGSIM lane 2, before aggregation/smoothing
+# (see ATTRIBUTION.md) -- the plausibility bar below.
 REAL_LATERAL_STD_M = 0.46
 
 
@@ -49,10 +30,8 @@ def validate(
     initial_offset: float = 1.5,
     speed: float = 20.0,
     k: float = 0.5,
-    # Convergence distance scales with initial_offset -- a 3.0m offset takes ~94m to
-    # settle under 0.3m at this speed/gain, measured directly rather than assumed;
-    # 150m gives real margin across the offsets this module is actually exercised
-    # with, without eating too much of the 642m path as "settled" evaluation data.
+    # Convergence distance scales with initial_offset -- 150m gives real margin across
+    # the offsets this module is exercised with (measured directly, not assumed).
     settle_distance: float = 150.0,
     dt: float = 0.1,
 ) -> LaneCenteringResult:
@@ -67,9 +46,7 @@ def validate(
         vehicle.update(speed, delta, dt)
 
         # Measured at the front axle, matching StanleyController.control()'s own
-        # cross-track error exactly -- it deliberately steers on front-axle CTE, not
-        # the vehicle's rear-axle x/y, so reporting rear-axle CTE here would validate a
-        # different quantity than the one the controller actually drives to zero.
+        # cross-track error -- reporting rear-axle CTE would validate a different quantity.
         front_x = vehicle.x + wheelbase * np.cos(vehicle.theta)
         front_y = vehicle.y + wheelbase * np.sin(vehicle.theta)
         nearest = int(np.argmin(np.hypot(path[:, 0] - front_x, path[:, 1] - front_y)))

@@ -1,35 +1,6 @@
-"""Hybrid A*: search over a discretized (x, y, theta) state space, where each
-expansion step is a short arc/straight primitive consistent with the vehicle's
-turning-radius limits, and the heuristic is the (obstacle-unaware) Reeds-Shepp
-path length to the goal. This is what lets the planner route *around* obstacles
-instead of only reacting to them at close range -- a single fixed Dubins/Reeds-Shepp
-path has no way to represent "go around," this does. See DESIGN.md section 6.
-
-Costing follows the standard practical formulation (Dolgov, Thrun, Montemerlo,
-Diebel, "Practical Search Techniques in Path Planning for Autonomous Driving",
-2010): a reverse-gear penalty, a cusp (direction-change) penalty, and a
-steering-change penalty, which together bias the search toward smooth, mostly-
-forward paths while still permitting reverse where it's the only way through (see
-the parallel_between_cars scenario).
-
-Analytic expansion (trying a direct, collision-checked Reeds-Shepp connection from
-the current search node straight to the goal) is what keeps obstacle-free scenarios
-fast: with zero obstacles, the very first attempt -- made on the root node,
-unconditionally -- already succeeds, so the search degenerates to one
-reeds_shepp_path() call, the same O(1) cost as DubinsPlanner today.
-
-Every `reeds_shepp_length`/`reeds_shepp_path` call here deliberately passes
-`include_ccc=False`, even though `reeds_shepp.py` now supports the CCC (3-point-turn)
-family for its own standalone planner: CCC paths are shorter but more curvature-
-aggressive than CSC's, and since analytic expansion is attempted from every search node
-once it's close to the goal (not just the final connection), letting Hybrid A* use CCC
-measurably reopened Pure Pursuit's curvature-saturation collision risk (KNOWN_BUGS.md
-entry 2) on scenarios that were previously safe. This planner already "degrades
-gracefully" without CCC -- its own primitive search can compose the same 3-point-turn
-shape out of ordinary forward/reverse steps when it needs to -- so it doesn't need the
-family and the curvature-risk cost isn't worth paying here. See reeds_shepp.py's module
-docstring for the full account.
-"""
+"""Hybrid A*: search over a discretized (x, y, theta) state space with arc/straight
+primitives, heuristic = obstacle-unaware Reeds-Shepp length, plus analytic expansion
+(direct Reeds-Shepp connection attempts) for fast obstacle-free cases. DESIGN.md section 6."""
 
 import heapq
 import itertools
@@ -44,14 +15,12 @@ from core.planning.reeds_shepp import reeds_shepp_length, reeds_shepp_path
 from core.vehicle import wrap_angle
 
 STEER_SIGNS = (-1, 0, 1)  # right, straight, left -- curvature is always 0 or
-# exactly 1/turning_radius, the same two values dubins.py restricts itself to, so
-# every primitive is drivable by construction.
+# exactly 1/turning_radius, so every primitive is drivable by construction.
 
 
 class PlanningFailure(RuntimeError):
-    """Raised when the search budget is exhausted with no path found. Never
-    silently return a partial/best-effort path -- see DESIGN.md section 8's
-    fail-loud precedent (e.g. IDM's explicit deceleration floor)."""
+    """Raised when the search budget is exhausted with no path found -- never silently
+    returns a partial/best-effort path (DESIGN.md section 8's fail-loud precedent)."""
 
 
 @dataclass
@@ -88,6 +57,8 @@ def _primitive_points(pose: Pose, steer_idx: int, gear: int, turning_radius: flo
     return _arc_points(pose, turning_radius, gear * (length / turning_radius), sign > 0, n)
 
 
+# Every Reeds-Shepp call below passes include_ccc=False: CCC is more curvature-aggressive
+# and reopened a collision risk on this planner's analytic expansion (KNOWN_BUGS.md entry 2).
 class HybridAStarPlanner:
     def __init__(
         self,

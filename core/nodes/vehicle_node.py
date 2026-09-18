@@ -1,14 +1,5 @@
-"""Ground-truth plant node: owns the real Vehicle, applies the last commanded control,
-and publishes true_state + noisy odometry each tick. See DESIGN.md's architecture
-diagram: true_state is subscribed only by SensorNode and the harness's own evaluation
-logic, never by the estimator/planner/controller.
-
-Acceleration limiting (bounding how fast commanded speed can actually change) and
-steering-angle clamping live here, not in the controller: they're physical actuator
-limits of the plant, not part of any controller's control law. ControllerNode is free
-to command an unreachable v_desired; this node is what enforces what the vehicle can
-actually do about it.
-"""
+"""Ground-truth plant node: owns the real Vehicle, applies the last commanded control, and
+publishes true_state + noisy odometry each tick. Accel/steering limits live here, not the controller."""
 
 import numpy as np
 

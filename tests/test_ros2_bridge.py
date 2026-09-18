@@ -1,8 +1,5 @@
-"""Tests what's actually testable in ros2_bridge.py without a real ROS2 install (see
-that module's docstring for what is and isn't verified): the message-conversion
-functions against known inputs, and Ros2Bridge's subscribe -> convert -> publish
-wiring, using minimal fakes for rclpy's Node/Publisher rather than the real thing.
-"""
+"""Tests what's actually testable in ros2_bridge.py without a real ROS2 install: the
+message-conversion functions, and Ros2Bridge's wiring, using minimal fakes for rclpy."""
 
 import numpy as np
 import pytest
@@ -32,10 +29,8 @@ def test_pose_estimate_conversion_maps_position_and_yaw_only_quaternion():
 
 
 def test_pose_estimate_conversion_embeds_covariance_at_the_right_flattened_indices():
-    """The 3x3 [x, y, theta] covariance must land at ROS2's (x, y, yaw) sub-indices
-    (0, 1, 5) of the flattened row-major 6x6 layout, not just anywhere plausible-
-    looking -- a wrong index here would silently corrupt every downstream consumer's
-    uncertainty estimate without ever raising an error."""
+    """The 3x3 covariance must land at ROS2's (x, y, yaw) sub-indices (0, 1, 5) of the
+    flattened 6x6 layout -- a wrong index would silently corrupt every downstream consumer."""
     cov = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
     msg = PoseEstimateMsg(x=0.0, y=0.0, theta=0.0, covariance=cov)
     flat = pose_estimate_to_ros_kwargs(msg)["covariance"]

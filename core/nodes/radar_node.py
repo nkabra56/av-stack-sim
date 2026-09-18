@@ -1,6 +1,5 @@
 """Simulated forward radar: noisy bumper-to-bumper range and closing range-rate to the
-lead vehicle. See DESIGN.md's ACC section.
-"""
+lead vehicle. See DESIGN.md's ACC section."""
 
 import numpy as np
 

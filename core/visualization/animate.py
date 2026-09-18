@@ -1,25 +1,5 @@
-"""Matplotlib animation of a parking run: a top-down view plus two live telemetry
-panels (IMPLEMENTATION.md's M5 milestone).
-
-Top-down (left, larger): the planned path (light gray), the true trajectory (solid
-blue, vehicle drawn at its true pose -- since that's what actually happened), the
-EKF's estimated trajectory (dashed orange), and a 1-sigma position-uncertainty ellipse
-around the estimate. The gap between the solid and dashed lines *is* the estimation
-error -- the whole point of having an estimator is visible directly in the animation,
-not just in a metrics table.
-
-Speed profile (top right): commanded speed vs. time, filling in as the run
-progresses, with a marker at the current tick -- makes the speed governor's throttling
-(KNOWN_BUGS.md entries 2/3) visible as a real dip in the trace, not just inferable
-from the vehicle slowing down on screen.
-
-Sensor readings (bottom right, polar): each ultrasonic beam's current range as a bar
-at its angle (relative to the vehicle's own heading, so the fan rotates rigidly with
-the vehicle exactly like the real body-frame sensor does), radius clamped to the
-sensor's own max_range. A beam that's clear reads at the rim; an obstacle closing in
-shows up as a bar shortening toward the center, in whichever direction it's actually
-approaching from.
-"""
+"""Matplotlib animation of a parking run: top-down view (planned/true/estimated trajectory,
+uncertainty ellipse) plus speed and polar ultrasonic-sensor panels. IMPLEMENTATION.md's M5 milestone."""
 
 import matplotlib.pyplot as plt
 import matplotlib.transforms as transforms
@@ -41,9 +21,8 @@ def _axis_bounds(result: SimulationResult, environment: Environment, pad: float 
         xs += list(result.true_history[:, 0])
         ys += list(result.true_history[:, 1])
     if result.path is not None and len(result.path):
-        # Otherwise the planned path can render outside the visible axes whenever the
-        # vehicle stalls well short of the goal (exactly the scenarios meant to show the
-        # gap between the planned path and what actually happened -- see DESIGN.md section 6).
+        # Otherwise the planned path can render outside the visible axes when the vehicle
+        # stalls well short of the goal -- exactly the case meant to show that gap.
         xs += list(result.path[:, 0])
         ys += list(result.path[:, 1])
     for obstacle in environment.obstacles:

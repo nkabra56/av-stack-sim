@@ -1,24 +1,5 @@
-"""Evaluates a trained ParkingEnv policy against the planner+controller baseline
-(HybridAStarPlanner + Pure Pursuit/MPC, via ParkingHarness) on the same scenarios --
-DESIGN.md section 10's "learned parking policy... compared against the
-planner+controller baseline" future extension.
-
-**Not a strictly apples-to-apples comparison, stated plainly rather than buried**: the
-RL policy is evaluated inside ParkingEnv, which (like the policy's own training loop)
-uses ground-truth state directly -- no Bus/EKF/sensor-noise graph. The baseline runs
-through the real, noisy ParkingHarness, exactly as it does everywhere else in this
-project. Plugging the trained policy into the real noisy loop as a drop-in `Controller`
-isn't possible without changing the `Controller` protocol itself: `Controller.control(
-pose, path)` has no way to hand a controller live sensor readings or an explicit goal
-position, both of which this policy's observation needs (`ControllerNode` sees
-obstacle_ranges internally for its own speed governor, but never forwards it to the
-wrapped controller). Changing that protocol to accommodate one experimental policy
-would ripple across every existing controller, so this comparison instead reports what
-it actually is: does an end-to-end learned policy work *at all*, evaluated on its own
-best terms, against how well the existing baseline does under its real, harder
-conditions. A true head-to-head under identical noisy conditions is real follow-up
-work, not attempted here.
-"""
+"""Evaluates a trained ParkingEnv policy against the planner+controller baseline. Not
+apples-to-apples: the policy sees ground truth, the baseline runs the real noisy ParkingHarness."""
 
 import argparse
 from dataclasses import dataclass

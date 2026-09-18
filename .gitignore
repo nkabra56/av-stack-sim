@@ -6,3 +6,6 @@ __pycache__/
 *.png
 *.mcap
 
+# graphify-generated knowledge graph (regenerate with `graphify update .`)
+graphify-out/
+

@@ -1,19 +1,6 @@
-"""Parses KITTI Odometry benchmark ground-truth poses into the (x, y, theta, v,
-yaw_rate) form the EKF validation needs. See DESIGN.md's "Validation against real
-data" section for the axis-convention derivation.
-
-Each line of a KITTI `poses/XX.txt` file is 12 numbers: a row-major 3x4 [R|t] matrix
-mapping the left-camera frame at that timestep into the frame-0 camera frame. KITTI's
-camera convention is x-right, y-down, z-forward -- so the ground-plane trajectory uses
-camera x (lateral) and z (forward), not the position vector's own x/y, and heading is
-the rotation about camera y, extracted as atan2(R[0,2], R[2,2]). This was verified
-empirically (not just asserted) by checking that the derived heading tracks the actual
-direction of travel between consecutive frames on a real sequence with turns.
-
-KITTI's poses-only download doesn't bundle per-frame timestamps; frames are assumed
-uniformly spaced at the Velodyne's nominal 10 Hz rate (dt=0.1s) -- an approximation,
-not an exact per-frame timestamp, noted here rather than silently assumed.
-"""
+"""Parses KITTI Odometry ground-truth poses into (x, y, theta, v, yaw_rate), using camera
+x/z as ground-plane x/y (KITTI's x-right/y-down/z-forward convention). See DESIGN.md's
+"Validation against real data" section."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +9,7 @@ import numpy as np
 
 from core.vehicle import wrap_angle
 
-NOMINAL_DT = 0.1
+NOMINAL_DT = 0.1  # KITTI's poses-only download has no per-frame timestamps; assumed uniform at 10Hz
 
 
 @dataclass

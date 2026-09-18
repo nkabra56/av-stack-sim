@@ -1,7 +1,5 @@
-"""SensorNode's dropout/latency modeling (DESIGN.md section 10's future-extensions
-list): a message that's dropped never arrives at all; a message under latency arrives
-`latency_ticks` ticks after it was computed, not immediately. Direct, deterministic
-unit coverage on the node itself, independent of any full harness run."""
+"""SensorNode's dropout/latency modeling: a dropped message never arrives; a delayed one
+arrives `latency_ticks` ticks after it was computed. Direct unit coverage on the node."""
 
 import numpy as np
 import pytest
@@ -47,9 +45,8 @@ def test_dropout_prob_one_never_delivers_anything():
 
 
 def test_dropout_is_probabilistic_not_all_or_nothing():
-    """A middling dropout_prob should deliver *some* but not *all* compass readings
-    over enough ticks -- confirms the RNG draw actually gates delivery per-message,
-    not just per-run."""
+    """A middling dropout_prob should deliver *some* but not *all* compass readings over
+    enough ticks -- confirms the RNG draw gates delivery per-message, not per-run."""
     bus = Bus()
     rng = np.random.default_rng(0)
     node = _sensor_node(bus, rng, dropout_prob=0.5)
@@ -76,9 +73,8 @@ def test_latency_delays_delivery_by_exactly_latency_ticks():
 
 
 def test_latency_preserves_the_original_measurement_not_a_stale_recompute():
-    """The delayed message should carry the value computed *when the reading was
-    taken*, not a value re-derived from wherever the vehicle is once it's released --
-    modeling a real late-arriving packet, not a teleporting one."""
+    """The delayed message should carry the value computed when the reading was taken,
+    not re-derived at release time -- modeling a late-arriving packet, not a teleporting one."""
     bus = Bus()
     rng = np.random.default_rng(0)
     ultrasonic = UltrasonicArray(angles=[0.0], max_range=8.0)

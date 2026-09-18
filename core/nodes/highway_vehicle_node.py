@@ -1,36 +1,6 @@
-"""Ground-truth plant node for the full closed-loop highway drive: owns a real 2D
-kinematic bicycle Vehicle (unmodified, same class parking uses), applies the last
-commanded (accel, delta) each tick, and publishes both the highway-mode topics H1/H2
-already expect and a new full-pose topic for evaluation. See DESIGN.md section 12's
-closed-loop drive entry.
-
-Deliberately NOT a modification of EgoLongitudinalNode: H1/H2 standalone keep their
-exact scalar point-mass model, tests, and validated numbers untouched (same "two
-methods/nodes for two genuinely different situations" precedent as ekf.py's
-predict()/predict_with_speed_state() split). This node reuses EgoLongitudinalNode's
-exact accel-integration physics (same a_min/a_max clip, same "can't reverse" floor) so
-H1/H2's already-NGSIM-validated closed-loop dynamics carry over unchanged -- adding
-steering doesn't change how speed itself is computed, it only adds what Vehicle.update
-does with that speed once computed.
-
-Publishes on the SAME "ego_state"/EgoLongitudinalStateMsg topic H1's RadarNode already
-consumes, so RadarNode needs zero code changes -- what changes is what `position`
-means (a projected arc-length along the lane centerline, core/control/lane_geometry.py,
-instead of a raw scalar), which RadarNode never needed to know about even before.
-
-Also publishes an always-on noisy compass and a low-rate noisy position fix (reusing
-CompassMsg/PositionFixMsg unchanged, same types/semantics/defaults SensorNode already
-uses for parking) -- a real gap found while building this: with no absolute
-correction at all, the 4-state EKF's x/y/theta is pure dead reckoning, and realistic
-steering-odometry noise accumulates into meters of real heading/position drift over a
-~600m run once Stanley is actually closing the loop on it (see ekf.py's
-predict_with_speed_state docstring for the two related fixes this also needed).
-Bundling these into the plant node rather than a separate highway SensorNode matches
-this project's own existing highway-mode precedent (EgoLongitudinalNode already
-publishes its own noisy accel_odometry/speedometer directly, no separate sensor node
-exists for H1/H2 either) -- parking's stricter plant/sensor split isn't violated by a
-mode that never had it to begin with.
-"""
+"""Ground-truth plant node for the full closed-loop highway drive: owns a real 2D kinematic
+Vehicle, applies (accel, delta), and publishes both H1/H2's topics and a full-pose topic.
+Reuses EgoLongitudinalNode's exact accel-integration physics. See DESIGN.md section 12."""
 
 import numpy as np
 
@@ -99,8 +69,7 @@ class HighwayVehicleNode:
 
     def step(self) -> None:
         accel = float(np.clip(self._last_accel_cmd.accel, self.a_min, self.a_max))
-        self.speed = max(0.0, self.speed + accel * self.dt)  # can't reverse under ACC,
-        # identical to EgoLongitudinalNode's integration -- see module docstring
+        self.speed = max(0.0, self.speed + accel * self.dt)  # can't reverse under ACC
         delta = float(np.clip(self._last_lateral_cmd.delta, -self.vehicle.max_steer, self.vehicle.max_steer))
         self.vehicle.update(self.speed, delta, self.dt)
 
@@ -112,8 +81,7 @@ class HighwayVehicleNode:
         )
 
         # Steering published before accel_odometry: SpeedEstimatorNode's predict fires
-        # synchronously off accel_odometry and needs this tick's noisy delta already
-        # cached (see speed_estimator_node.py's _on_steering_odometry).
+        # synchronously off accel_odometry and needs this tick's delta already cached.
         self.bus.publish("steering_odometry", SteeringOdometryMsg(delta + self.rng.normal(0.0, self.steering_odom_std)))
         self.bus.publish("accel_odometry", AccelOdometryMsg(accel + self.rng.normal(0.0, self.accel_odom_std)))
         self.bus.publish("speedometer", SpeedometerMsg(self.speed + self.rng.normal(0.0, self.speedometer_std)))

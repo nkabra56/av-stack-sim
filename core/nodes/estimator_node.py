@@ -1,8 +1,5 @@
-"""Wraps the EKF: predicts on odometry, corrects on compass/position_fix/landmark
-readings, republishes pose_estimate after every update. Landmark ids are resolved
-against Environment.obstacles -- the filter treats their positions as known/mapped,
-not something it also has to estimate (localization only, not SLAM).
-"""
+"""Wraps the EKF: predicts on odometry, corrects on compass/position_fix/landmark readings,
+republishes pose_estimate after each update. Localization only, not SLAM (landmarks are known)."""
 
 from core.environment import Environment
 from core.estimation.ekf import ExtendedKalmanFilter

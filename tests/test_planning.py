@@ -34,10 +34,8 @@ def _curvature(path: np.ndarray) -> np.ndarray:
 @pytest.mark.parametrize("planner_name", list(PLANNERS))
 @pytest.mark.parametrize("scenario_name", list_scenarios())
 def test_path_starts_and_ends_at_the_given_poses(planner_name, scenario_name):
-    """Tight tolerance, not the controller's noisy tol=0.4: both planners are
-    guaranteed to land exactly on the given start/goal poses by construction
-    (closed-form endpoint for Reeds-Shepp, a verified analytic-expansion connection
-    for Hybrid A* -- see hybrid_astar.py's module docstring)."""
+    """Tight tolerance, not the controller's noisy tol=0.4: both planners are guaranteed
+    to land exactly on the given start/goal poses by construction."""
     scenario, start, goal, turning_radius = _scenario_pose(scenario_name)
     path = PLANNERS[planner_name].plan(start, goal, scenario.environment.obstacles, turning_radius)
     assert path[0] == pytest.approx(start, abs=1e-2)
@@ -47,12 +45,8 @@ def test_path_starts_and_ends_at_the_given_poses(planner_name, scenario_name):
 @pytest.mark.parametrize("planner_name", list(PLANNERS))
 @pytest.mark.parametrize("scenario_name", list_scenarios())
 def test_path_never_exceeds_the_vehicle_turning_radius(planner_name, scenario_name):
-    """Same style of discrete curvature check that caught the M1 Bezier-curvature bug
-    (IMPLEMENTATION.md section 6): curvature must never exceed 1/turning_radius
-    anywhere along the path. +1e-3 epsilon absorbs the chord-vs-arc-length
-    discretization slop (chord distance is always slightly shorter than true arc
-    length, so dtheta/chord slightly *over*-estimates true curvature -- the safe
-    direction), not a real tolerance widening."""
+    """Same style of discrete curvature check that caught the M1 Bezier-curvature bug:
+    curvature must never exceed 1/turning_radius. +1e-3 epsilon absorbs chord-vs-arc discretization slop."""
     scenario, start, goal, turning_radius = _scenario_pose(scenario_name)
     path = PLANNERS[planner_name].plan(start, goal, scenario.environment.obstacles, turning_radius)
     curvature = _curvature(path)
@@ -68,13 +62,8 @@ def test_hybrid_astar_never_comes_within_the_vehicle_radius_of_an_obstacle(scena
         assert dist.min() >= obstacle.radius + VEHICLE_RADIUS - 1e-6
 
 
-# --- CCC (LRL/RLR, KNOWN_BUGS.md entry 5): reeds_shepp.py's own close-pose family ----
-#
-# Built via direct geometric construction (tangent-circle centers), not a from-memory
-# trig formula -- verified below by reconstructing every candidate's (t, p, q) through
-# the same arc-stepping machinery the rest of this module already trusts
-# (dubins.py's _arc_points, via reeds_shepp.py's _ccc_points) and checking it actually
-# lands on the goal pose, rather than just trusting the derivation.
+# --- CCC (LRL/RLR, KNOWN_BUGS.md entry 5): built via direct geometric construction, verified
+# below by reconstructing every candidate through the same arc-stepping machinery and checking the goal.
 
 
 def test_ccc_candidates_reconstruct_to_the_goal_pose():
@@ -101,10 +90,8 @@ def test_ccc_candidates_reconstruct_to_the_goal_pose():
 
 
 def test_ccc_is_infeasible_only_when_turning_circles_are_far_apart():
-    """The 4x-turning_radius regime KNOWN_BUGS.md entry 5 describes: CCC needs the
-    start/goal turning circles within 4*turning_radius of each other (two tangent
-    circles of radius 2r fitting between them) -- confirm both sides of that boundary
-    behave as expected, not just that *some* CCC cases work."""
+    """The 4x-turning_radius regime KNOWN_BUGS.md entry 5 describes -- confirm both
+    sides of that boundary behave as expected, not just that some CCC cases work."""
     close = _solve_ccc((0.0, 0.0, 0.0), (0.5, 0.0, np.pi), 1.0)  # d=0.5, well under 4x
     assert close is not None
 
@@ -113,10 +100,8 @@ def test_ccc_is_infeasible_only_when_turning_circles_are_far_apart():
 
 
 def test_reeds_shepp_planner_never_raises_in_the_close_pose_regime():
-    """Direct regression guard for KNOWN_BUGS.md entry 5's actual finding: CSC alone
-    (all 4 families) never made ReedsSheppPlanner.plan() raise in this regime to begin
-    with (verified separately, 20,000 random trials) -- this pins that down as a
-    permanent test, not just a one-off investigation."""
+    """Direct regression guard for KNOWN_BUGS.md entry 5: CSC alone never made
+    ReedsSheppPlanner.plan() raise in this regime (verified separately, 20,000 trials)."""
     planner = ReedsSheppPlanner()
     rng = np.random.default_rng(11)
     for _ in range(300):
@@ -128,11 +113,8 @@ def test_reeds_shepp_planner_never_raises_in_the_close_pose_regime():
 
 
 def test_reeds_shepp_length_matches_the_actual_generated_path_length():
-    """Regression guard for the Euclidean-fallback bug found while validating CCC
-    (see reeds_shepp_length's docstring): previously this almost always returned the
-    straight-line distance regardless of what path was actually produced, since it was
-    unconditionally included in the min(). `include_ccc=True` (the default, used by the
-    standalone planner) must report the real selected path's length."""
+    """Regression guard for the Euclidean-fallback bug (see reeds_shepp_length's docstring):
+    this used to almost always return straight-line distance regardless of the actual path."""
     rng = np.random.default_rng(13)
     for _ in range(200):
         start = (0.0, 0.0, float(rng.uniform(-np.pi, np.pi)))
@@ -148,9 +130,8 @@ def test_reeds_shepp_length_matches_the_actual_generated_path_length():
 
 
 def test_ccc_produces_meaningfully_shorter_paths_in_the_close_pose_regime():
-    """Quantifies the actual value CCC adds (KNOWN_BUGS.md entry 5's real finding: not
-    a crash fix, a path-quality one) -- if this ever drops near zero, CCC isn't doing
-    anything and the added complexity wouldn't be worth it."""
+    """Quantifies the actual value CCC adds (KNOWN_BUGS.md entry 5: a path-quality fix,
+    not a crash fix) -- if this drops near zero, the added complexity isn't worth it."""
     rng = np.random.default_rng(17)
     shorter_count = 0
     trials = 300
@@ -176,14 +157,8 @@ def test_ccc_produces_meaningfully_shorter_paths_in_the_close_pose_regime():
 
 
 def test_hybrid_astar_does_not_use_ccc():
-    """KNOWN_BUGS.md entry 5 / reeds_shepp.py's module docstring: CCC is deliberately
-    NOT available to HybridAStarPlanner (all 4 of its reeds_shepp_length/reeds_shepp_path
-    call sites pass include_ccc=False), because it's more curvature-aggressive than CSC
-    and reopened Pure Pursuit's curvature-saturation collision risk (KNOWN_BUGS.md entry 2)
-    on scenarios that were previously safe when tried unconditionally. This doesn't
-    re-derive that finding (tests/test_simulation.py's collision tests already do,
-    every run) -- it just pins the source-level guard so a future edit can't silently
-    drop `include_ccc=False` from one of those call sites without a test noticing."""
+    """KNOWN_BUGS.md entry 5: CCC is deliberately NOT available to HybridAStarPlanner (more
+    curvature-aggressive, reopened KNOWN_BUGS.md entry 2) -- pins the source-level guard."""
     import inspect
 
     source = inspect.getsource(HybridAStarPlanner)
