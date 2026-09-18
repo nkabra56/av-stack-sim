@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
+from core.background_traffic import simulate_lane
 from core.control.acc import IDMController, MpcAccController
 from core.control.intersection import IntersectionNavigator
 from core.control.intersection_geometry import EAST, NORTH, SOUTH, WEST
@@ -20,11 +21,13 @@ from core.harness import ParkingHarness
 from core.intersection2d_harness import VehicleSpec, run_multi_approach_scenario
 from core.intersection_harness import other_vehicle_present_from
 from core.scenario_loader import load_scenario
+from core.signalized_intersection import demo_cars, run_signalized_scenario
 from core.validation.kitti_ekf_validation import DEFAULT_POSES_PATH, validate
 from core.validation.kitti_loader import load_kitti_poses
 from core.validation.lane_centering_validation import REAL_LATERAL_STD_M
 from core.validation.lane_centering_validation import validate as validate_lane_centering
 from core.validation.ngsim_loader import load_following_pair, load_lane_centerline
+from core.visualization import scenery
 from core.visualization.animate import VEHICLE_LENGTH, VEHICLE_WIDTH, _axis_bounds, _ellipse_params
 
 DEFAULT_OUT = Path(__file__).parents[2] / "docs" / "viewer" / "scenes.js"
@@ -43,6 +46,15 @@ PARKING_SCENES = [
     ("parallel_between_cars", "pure_pursuit", "Same scene with Pure Pursuit: fails safe",
      "Pure Pursuit cannot track the curvature-saturated cusp. The speed governor halts it before the collision circles touch."),
 ]
+GRASS, URBAN_GROUND = "#16231d", "#1c2026"
+PALETTE = ["#9ca3af", "#e5e7eb", "#b91c1c", "#1e3a8a", "#166534", "#78350f", "#374151", "#a1a1aa", "#0e7490", "#7c2d12"]
+APPROACHES = {"N": NORTH, "E": EAST, "S": SOUTH, "W": WEST}
+HIGHWAY_OFFSETS = [LANE_WIDTH, 0.0, -LANE_WIDTH]
+# (lane offset, replay lag in seconds, front-bumper starts, car lengths): cars in the lanes beside the ego
+BACKGROUND_LANES = [
+    (LANE_WIDTH, 3.0, [110.0, 75.0, 42.0, 10.0, -25.0], [4.6, 4.4, 5.2, 4.5, 4.8]),
+    (-LANE_WIDTH, -4.0, [135.0, 98.0, 62.0, 28.0, -8.0], [4.5, 5.0, 4.4, 4.7, 4.5]),
+]
 APPROACH_COLORS = {"N": BLUE, "E": "#10b981", "S": ORANGE, "W": "#a855f7"}
 APPROACH_NAMES = {"N": "the north", "E": "the east", "S": "the south", "W": "the west"}
 STATE_LABELS = ["approaching", "stopped", "proceeding"]
@@ -52,8 +64,12 @@ def _arr(values, digits: int = 3) -> list:
     return np.round(np.asarray(values, dtype=float), digits).tolist()
 
 
-def _track(x, y, theta) -> dict:
-    return {"x": _arr(x), "y": _arr(y), "th": _arr(theta, 4)}
+def _track(x, y, theta, digits: int = 3) -> dict:
+    return {"x": _arr(x, digits), "y": _arr(y, digits), "th": _arr(theta, digits + 1)}
+
+
+def _prov(real: str, simulated: str) -> dict:
+    return {"real": real, "simulated": simulated}
 
 
 def _car(track: str, color: str, label: str, **extra) -> dict:
@@ -119,6 +135,13 @@ def _parking_scene(scenario_name: str, controller_name: str, title: str, blurb: 
         ],
         "rays": {"angles": _arr(result.sensor_angles, 3), "ranges": _arr(result.sensor_ranges, 2), "track": "ego"},
         "uncertainty": {"track": "est", "ellipse": _arr(ellipses, 3)},
+        "watch": [
+            "The cyan line is the Hybrid A* path; the car reverses through its cusp to reach the stall.",
+            "The orange ghost and shaded ellipse are the EKF's pose estimate and 2-sigma uncertainty.",
+            "The rays are the ultrasonic sensors that the speed governor brakes on.",
+        ],
+        "provenance": _prov("Nothing recorded: the lot is a hand-built scenario.",
+                            "The vehicle, its sensors, the EKF, the planner and the controller."),
     }
 
 
@@ -174,9 +197,32 @@ def _follow_outcome(run: _FollowRun) -> dict:
     }
 
 
+def _background_traffic(run: _FollowRun) -> tuple[dict, list, dict]:
+    """IDM traffic in the lanes beside the ego, driven by the recorded flow. Returns tracks, vehicles, signals."""
+    flow, table, centerline = run.pair.leader.speed, run.table, run.centerline
+    tracks, vehicles, signals = {}, [], {}
+    for lane, (offset, lag, fronts, lengths) in enumerate(BACKGROUND_LANES):
+        pos, _ = simulate_lane(flow, fronts, lengths, lag_ticks=round(lag * 10))
+        for car in range(len(fronts)):
+            x, y, th = _pose_on_lane(np.clip(pos[car] - lengths[car] / 2, table[0], table[-1]), centerline, table)
+            name = f"bg{lane}_{car}"
+            tracks[name] = _track(x - offset * np.sin(th), y + offset * np.cos(th), th, 2)
+            signals[f"on_{name}"] = ((pos[car] > table[0] + 6) & (pos[car] < table[-1] - 6)).astype(int).tolist()
+            vehicles.append({**_car(name, PALETTE[(lane * 5 + car) % len(PALETTE)], "Background traffic"),
+                             "length": lengths[car], "visible": f"on_{name}"})
+    return tracks, vehicles, signals
+
+
+def _highway_road(centerline, offsets, style: str = "highway") -> dict:
+    return {"centerline": _arr(centerline[:, :2], 2), "width": LANE_WIDTH, "offsets": offsets, "style": style,
+            "shoulder": 2.5}
+
+
 def _follow_scene(scene_id: str, controller_name: str, title: str, subtitle: str, blurb: str) -> dict:
     run = _follow_run(controller_name)
     r = run.result
+    bg_tracks, bg_vehicles, bg_signals = _background_traffic(run)
+    speed = np.asarray(r.ego_speed)
     return {
         "id": scene_id,
         "group": "Highway and intersections",
@@ -184,26 +230,44 @@ def _follow_scene(scene_id: str, controller_name: str, title: str, subtitle: str
         "subtitle": subtitle,
         "blurb": blurb,
         "kind": "highway",
+        "ground": GRASS,
+        "grid": False,
         "dt": 0.1,
         "n": len(r.times),
         "outcome": _follow_outcome(run),
-        "road": {"centerline": _arr(run.centerline[:, :2], 2), "width": LANE_WIDTH},
-        "tracks": {"ego": _track(*run.ego), "lead": _track(*run.lead)},
+        "road": _highway_road(run.centerline, HIGHWAY_OFFSETS),
+        "props": scenery.highway_props(run.centerline, run.table, HIGHWAY_OFFSETS, LANE_WIDTH, seed=3),
+        "tracks": {"ego": _track(*run.ego), "lead": _track(*run.lead), **bg_tracks},
         "vehicles": [
-            _car("ego", BLUE, "Ego vehicle", steer="delta"),
-            {**_car("lead", GRAY, "Lead vehicle (recorded human driver)"), "length": run.pair.leader.length, "width": 1.9},
+            _car("ego", BLUE, "Ego vehicle", steer="delta", tag="Ego"),
+            {**_car("lead", GRAY, "Lead vehicle (recorded human driver)", tag="Lead"), "length": run.pair.leader.length,
+             "width": 1.9},
+            *bg_vehicles,
         ],
+        "gap_pair": {"front": "lead", "rear": "ego", "key": "gap"},
         "trails": [{"track": "ego", "color": BLUE}],
         "signals": {
-            "v": _arr(r.ego_speed), "delta": _arr(r.ego_delta, 4), "gap": _arr(run.gap, 2),
-            "lead_v": _arr(r.lead_speed), "cte": _arr(r.cross_track_error, 3),
+            "v": _arr(speed), "delta": _arr(r.ego_delta, 4), "gap": _arr(run.gap, 2), "lead_v": _arr(r.lead_speed),
+            "cte": _arr(r.cross_track_error, 3), "accel": _arr(r.ego_accel, 2),
+            "time_gap": _arr(np.minimum(run.gap / np.maximum(speed, 0.5), 60.0), 1), **bg_signals,
         },
         "hud": [
             {"key": "v", "label": "Ego speed", "unit": "m/s", "fmt": 1},
             {"key": "lead_v", "label": "Lead speed", "unit": "m/s", "fmt": 1},
             {"key": "gap", "label": "Gap", "unit": "m", "fmt": 1},
+            {"key": "time_gap", "label": "Time gap", "unit": "s", "fmt": 1},
+            {"key": "accel", "label": "Acceleration", "unit": "m/s²", "fmt": 1},
             {"key": "cte", "label": "Lane offset", "unit": "m", "fmt": 2},
         ],
+        "watch": [
+            "The colored bar between the cars is the gap; it turns amber and then red as it closes.",
+            "Brake lights come on as the cars slow, including the ego's, through the recorded full stop.",
+            "The ego holds its lane while starting 1.5 m off center.",
+        ],
+        "provenance": _prov(
+            "The lead car's motion, the lane geometry, and the flow that drives the other lanes.",
+            "The ego (controller, sensors, EKF) and the cars in the other lanes (IDM followers, no lane changes). "
+            "The road furniture is illustrative."),
     }
 
 
@@ -230,6 +294,7 @@ def _stop_sign_scene() -> dict:
 
     sx, sy, sth = _pose_on_lane(STOP_LINE, centerline, table)
     cx, cy, cth = _pose_on_lane(STOP_LINE + 8.0, centerline, table)
+    wx, wy, _ = _pose_on_lane(STOP_LINE + 2.6, centerline, table)
     nx, ny = -np.sin(sth), np.cos(sth)
     ticks = np.arange(len(r.times)) * dt
     cross = (ticks >= arrival) & (ticks < clear)
@@ -239,6 +304,9 @@ def _stop_sign_scene() -> dict:
             f"It proceeded at {r.proceed_time:.1f} s without running the stop line.")}
     else:
         outcome = {"label": "Stop-sign violation", "tone": "bad", "detail": "The ego did not stop and yield as required."}
+    props = scenery.highway_props(centerline, table, [LANE_WIDTH, 0.0], LANE_WIDTH, seed=4, rails=False)
+    props += [scenery.stop_sign(sx + (LANE_WIDTH / 2 + 1.3) * np.sin(sth), sy - (LANE_WIDTH / 2 + 1.3) * np.cos(sth), sth),
+              scenery.crosswalk(wx + LANE_WIDTH / 2 * nx, wy + LANE_WIDTH / 2 * ny, sth, 2 * LANE_WIDTH)]
 
     return {
         "id": "stop-sign-yield",
@@ -246,13 +314,15 @@ def _stop_sign_scene() -> dict:
         "title": "Stop sign: yielding to cross traffic",
         "subtitle": "ACC + intersection navigator + Stanley",
         "blurb": ("The ego cruises, stops at the line, and yields to scripted cross traffic that arrived first. "
-                  "Acceleration is the more conservative of ACC and the navigator. The cross street is illustrative: "
-                  "the navigator only models a stop line and when other traffic is present."),
+                  "Acceleration is the more conservative of ACC and the navigator."),
         "kind": "highway",
+        "ground": GRASS,
+        "grid": False,
         "dt": dt,
         "n": len(r.times),
         "outcome": outcome,
-        "road": {"centerline": _arr(centerline[:, :2], 2), "width": LANE_WIDTH},
+        "road": _highway_road(centerline, [LANE_WIDTH, 0.0], "arterial"),
+        "props": props,
         "decor": {
             "strips": [{"x1": cx - 30 * nx, "y1": cy - 30 * ny, "x2": cx + 30 * nx, "y2": cy + 30 * ny,
                         "width": 8.0, "color": ASPHALT}],
@@ -262,7 +332,7 @@ def _stop_sign_scene() -> dict:
         "zones": [{"x": cx, "y": cy, "w": 8.0, "h": 60.0, "th": cth, "color": "#fbbf24", "opacity": 0.3,
                    "t0": arrival, "t1": clear, "label": "Cross traffic present (scripted)"}],
         "tracks": {"ego": _track(ego_x, ego_y, r.ego_theta)},
-        "vehicles": [_car("ego", BLUE, "Ego vehicle", steer="delta")],
+        "vehicles": [_car("ego", BLUE, "Ego vehicle", steer="delta", tag="Ego")],
         "trails": [{"track": "ego", "color": BLUE}],
         "signals": {
             "v": _arr(r.ego_speed), "delta": _arr(r.ego_delta, 4), "to_line": _arr(to_line, 1),
@@ -274,23 +344,40 @@ def _stop_sign_scene() -> dict:
             {"key": "state", "label": "Navigator", "labels": STATE_LABELS},
             {"key": "cross", "label": "Cross traffic", "labels": ["clear", "present"]},
         ],
+        "watch": [
+            "The ego brakes to a stop short of the white line and the STOP sign, then waits.",
+            "While the amber zone is lit, scripted cross traffic has right of way; the ego goes only when it clears.",
+        ],
+        "provenance": _prov(
+            "The lane geometry.",
+            "The ego, its ACC, Stanley and navigator. Cross traffic is a scripted presence window with no "
+            "trajectory; the cross street, sign and crosswalk are illustrative overlays on a freeway lane."),
     }
 
 
-def _intersection_scene(scene_id: str, title: str, blurb: str, specs: list[VehicleSpec], max_steps: int) -> dict:
-    result = run_multi_approach_scenario(specs, max_steps=max_steps)
-    reach = max(s.start_distance for s in specs) + 25.0
-    half, road_w = INTERSECTION_HALF, INTERSECTION_ROAD_WIDTH
-
-    strips = [{"x1": 0, "y1": -reach, "x2": 0, "y2": reach, "width": road_w, "color": ASPHALT},
-              {"x1": -reach, "y1": 0, "x2": reach, "y2": 0, "width": road_w, "color": ASPHALT}]
-    bars = [{"x1": a, "y1": b, "x2": c, "y2": d, "w": 0.15, "color": "#d4a72c", "opacity": 0.8}
-            for a, b, c, d in [(0, half, 0, reach), (0, -reach, 0, -half), (half, 0, reach, 0), (-reach, 0, -half, 0)]]
-    for spec in specs:
-        px, py = spec.approach.position(-(half + 1.5), 3.0)
-        nx, ny = -np.sin(spec.approach.heading), np.cos(spec.approach.heading)
+def _intersection_decor(legs: str, reach: float) -> dict:
+    half, rw = INTERSECTION_HALF, INTERSECTION_ROAD_WIDTH / 2
+    x0, x1, y0, y1 = scenery.box_rect(legs, rw, half)
+    ends = {"N": (0, 0, 0, reach), "S": (0, -reach, 0, 0), "E": (0, 0, reach, 0), "W": (-reach, 0, 0, 0)}
+    strips = [{"x1": ends[g][0], "y1": ends[g][1], "x2": ends[g][2], "y2": ends[g][3], "width": 2 * rw, "color": ASPHALT}
+              for g in legs]
+    lines = {"N": (0, y1, 0, reach), "S": (0, -reach, 0, y0), "E": (x1, 0, reach, 0), "W": (-reach, 0, x0, 0)}
+    bars = [{"x1": lines[g][0], "y1": lines[g][1], "x2": lines[g][2], "y2": lines[g][3], "w": 0.15,
+             "color": "#d4a72c", "opacity": 0.8} for g in legs]
+    for g in legs:
+        a = APPROACHES[g]
+        px, py = a.position(-(half + 1.5), 3.0)
+        nx, ny = -np.sin(a.heading), np.cos(a.heading)
         bars.append({"x1": px - 1.5 * nx, "y1": py - 1.5 * ny, "x2": px + 1.5 * nx, "y2": py + 1.5 * ny,
                      "w": 0.4, "color": "#f3f4f6"})
+    box = {"x": (x0 + x1) / 2, "y": (y0 + y1) / 2, "w": x1 - x0, "h": y1 - y0, "th": 0, "color": ZONE, "opacity": 1}
+    return {"strips": strips, "boxes": [box], "bars": bars}
+
+
+def _intersection_scene(scene_id: str, title: str, blurb: str, specs: list[VehicleSpec], max_steps: int,
+                        legs: str = "NESW", watch: list | None = None) -> dict:
+    result = run_multi_approach_scenario(specs, max_steps=max_steps)
+    reach = max(s.start_distance for s in specs) + 25.0
 
     names = [v.name for v in result.vehicles]
     proceed = {v.name: float(next(t for t, s in zip(result.times, v.states, strict=True) if s.name == "PROCEEDING"))
@@ -308,20 +395,24 @@ def _intersection_scene(scene_id: str, title: str, blurb: str, specs: list[Vehic
         "subtitle": "Navigators on 2D intersection geometry",
         "blurb": blurb,
         "kind": "intersection",
+        "ground": URBAN_GROUND,
+        "grid": False,
         "dt": 0.1,
         "n": len(result.times),
         "outcome": outcome,
         "bounds": [-reach, reach, -reach, reach],
         "view_bounds": [-55, 55, -55, 55],
-        "decor": {"strips": strips,
-                  "boxes": [{"x": 0, "y": 0, "w": 2 * half, "h": 2 * half, "th": 0, "color": ZONE, "opacity": 1}],
-                  "bars": bars},
+        "decor": _intersection_decor(legs, reach),
+        "props": scenery.urban_props(legs, APPROACHES, INTERSECTION_HALF, INTERSECTION_ROAD_WIDTH, 75.0, seed=len(scene_id)),
         "tracks": {v.name: _track(v.x, v.y, v.theta) for v in result.vehicles},
         "vehicles": [_car(s.approach.name, APPROACH_COLORS[s.approach.name],
-                          f"From {APPROACH_NAMES[s.approach.name]}, going {s.turn}") for s in specs],
+                          f"From {APPROACH_NAMES[s.approach.name]}, going {s.turn}", tag=s.approach.name) for s in specs],
         "trails": [{"track": s.approach.name, "color": APPROACH_COLORS[s.approach.name]} for s in specs],
         "signals": {f"state_{v.name}": [STATE_LABELS.index(s.name.lower()) for s in v.states] for v in result.vehicles},
         "hud": [{"key": f"state_{n}", "label": f"{n}, {s.turn}", "labels": STATE_LABELS} for n, s in zip(names, specs, strict=True)],
+        "watch": watch or [],
+        "provenance": _prov("Nothing recorded.",
+                            "Every car runs its own navigator on the same 2D geometry, with a collision check between every pair."),
     }
 
 
@@ -331,7 +422,20 @@ def _four_way_scene() -> dict:
     return _intersection_scene(
         "four-way-stop", "Four-way stop, staggered arrivals",
         "Four cars reach a four-way stop at different times and proceed in arrival order. Each runs its own "
-        "navigator on real 2D geometry, with a collision check between every pair.", specs, 5000)
+        "navigator on real 2D geometry, with a collision check between every pair.", specs, 5000,
+        watch=["Each car stops behind its white line at the STOP sign, then goes once it has right of way.",
+               "The panel tracks every car's state; the first to arrive is the first to proceed."])
+
+
+def _three_way_scene() -> dict:
+    specs = [VehicleSpec(NORTH, start_distance=70.0), VehicleSpec(EAST, start_distance=90.0),
+             VehicleSpec(WEST, start_distance=110.0)]
+    return _intersection_scene(
+        "three-way-stop", "Three-way stop (T intersection)",
+        "A T intersection with no south leg. Three cars arrive in turn and the navigators sort out the order.",
+        specs, 5000, legs="NEW",
+        watch=["There is no road to the south, so the paved area is smaller on that side.",
+               "Arrival order decides who goes: north, then east, then west."])
 
 
 def _left_turn_scene() -> dict:
@@ -339,7 +443,68 @@ def _left_turn_scene() -> dict:
     return _intersection_scene(
         "left-turn-yield", "Left turn yielding to oncoming traffic",
         "The north car arrives first but is turning left, so it waits for the oncoming southbound car "
-        "to clear before crossing.", specs, 6000)
+        "to clear before crossing.", specs, 6000,
+        watch=["The blue car stops first but yields: left turns give way to oncoming traffic.",
+               "It follows a curved Dubins path through the box once the southbound car has cleared."])
+
+
+def _signalized_scene() -> dict:
+    cars, reach = demo_cars(), 155.0
+    res = run_signalized_scenario(cars)
+    n = len(res.times)
+    tracks, vehicles, signals = {}, [], {"sig_ns": res.ns_state.tolist(), "sig_ew": res.ew_state.tolist()}
+    waiting, through = np.zeros(n), np.zeros(n)
+    for i, c in enumerate(res.cars):
+        name = f"c{i}"
+        tracks[name] = _track(c.x, c.y, c.theta, 2)
+        signals[f"on_{name}"] = c.active.astype(int).tolist()
+        vehicles.append({**_car(name, PALETTE[i % len(PALETTE)], f"Car {i}"), "visible": f"on_{name}"})
+        crossed_at = c.line_time if c.line_time is not None else np.inf
+        waiting += c.active & (c.speed < 0.5) & (res.times < crossed_at)
+        through += res.times >= crossed_at
+    signals["waiting"], signals["through"] = waiting.astype(int).tolist(), through.astype(int).tolist()
+    keys = {"N": "sig_ns", "S": "sig_ns", "E": "sig_ew", "W": "sig_ew"}
+    lights = ["green", "yellow", "red"]
+    return {
+        "id": "signalized-intersection",
+        "group": "Highway and intersections",
+        "title": "Signalized intersection",
+        "subtitle": "Fixed-time signal with IDM cars",
+        "blurb": ("Twenty-five cars approach a fixed-time signal: 14 s green, 3 s yellow, 2 s all-red for each "
+                  "direction. Cross-street cars queue on red and discharge on green."),
+        "kind": "intersection",
+        "ground": URBAN_GROUND,
+        "grid": False,
+        "dt": 0.1,
+        "n": n,
+        "outcome": {"label": "No red-light entries" if not res.red_entries else "Red-light entry",
+                    "tone": "ok" if not res.red_entries and not res.collided else "bad",
+                    "detail": f"{int(through[-1])} of {len(cars)} cars cleared the stop line in {res.times[-1]:.0f} s "
+                              f"with no collision; the smallest same-lane gap was {res.min_gap:.1f} m."},
+        "bounds": [-reach, reach, -reach, reach],
+        "view_bounds": [-55, 55, -55, 55],
+        "decor": _intersection_decor("NESW", reach),
+        "props": scenery.urban_props("NESW", APPROACHES, INTERSECTION_HALF, INTERSECTION_ROAD_WIDTH, 75.0, seed=11,
+                                     signal_keys=keys),
+        "tracks": tracks,
+        "vehicles": vehicles,
+        "legend": [{"color": BLUE, "text": "Cars (IDM, straight through)"},
+                   {"color": "#22c55e", "text": "Signal heads: the lit lamp is the current phase"}],
+        "signals": signals,
+        "hud": [
+            {"key": "sig_ns", "label": "North-south", "labels": lights},
+            {"key": "sig_ew", "label": "East-west", "labels": lights},
+            {"key": "waiting", "label": "Cars waiting", "unit": "", "fmt": 0},
+            {"key": "through", "label": "Cars through", "unit": "", "fmt": 0},
+        ],
+        "watch": [
+            "Cars slow for yellow only if they cannot clear the line, and stop behind the white bar on red.",
+            "Queues build on the red approaches and release together when the light turns green.",
+            "Every car uses the stack's IDM controller; there are no turns or pedestrians.",
+        ],
+        "provenance": _prov("Nothing recorded.",
+                            "The signal plan and all 25 cars, including their spawn times. The scenery is illustrative."),
+    }
 
 
 @cache
@@ -357,6 +522,7 @@ def _kitti_scene(scene_id: str = "kitti-ekf", title: str = "Real KITTI drive: EK
     res = validate(seq, seed=0, **noise)
     speed = np.append(seq.v, seq.v[-1])
     x0, y0 = res.true[0, :2]
+    route = np.column_stack([res.true[:, 0] - x0, -(res.true[:, 1] - y0)])
 
     def flip(pose: np.ndarray) -> dict:
         # KITTI's ground-plane frame is left-handed (y to the right); negating y and heading
@@ -379,12 +545,15 @@ def _kitti_scene(scene_id: str = "kitti-ekf", title: str = "Real KITTI drive: EK
             "The path is a real 30 s urban drive from KITTI ground truth. Sensor noise is simulated on top, "
             "so this compares estimators, not sensors. Dead reckoning drifts, the EKF stays on the road."),
         "kind": "kitti",
+        "ground": URBAN_GROUND,
+        "grid": False,
         "dt": float(seq.times[1] - seq.times[0]),
         "n": len(seq.x),
         "outcome": {"label": f"EKF {res.ekf_rmse:.3f} m RMSE", "tone": "ok", "detail": detail},
-        "path": _arr(np.column_stack([res.true[:, 0] - x0, -(res.true[:, 1] - y0)]), 2),
+        "road": {"centerline": _arr(route[::3], 2), "width": 6.5},
+        "props": scenery.route_props(route[::3], 6.5, seed=5),
         "tracks": {"truth": flip(res.true), "ekf": flip(res.ekf), "dr": flip(res.dead_reckoning)},
-        "vehicles": [_car("truth", BLUE, "Ground truth (KITTI)"), _ghost("ekf", ORANGE, "EKF estimate"),
+        "vehicles": [_car("truth", BLUE, "Ground truth (KITTI)", tag="Truth"), _ghost("ekf", ORANGE, "EKF estimate"),
                      _ghost("dr", RED, "Dead reckoning")],
         "trails": [{"track": "truth", "color": BLUE}, {"track": "ekf", "color": ORANGE}, {"track": "dr", "color": RED}],
         "signals": {"v": _arr(speed, 2), "ekf_err": _arr(res.ekf_err, 2), "dr_err": _arr(res.dr_err, 2)},
@@ -393,6 +562,14 @@ def _kitti_scene(scene_id: str = "kitti-ekf", title: str = "Real KITTI drive: EK
             {"key": "ekf_err", "label": "EKF error", "unit": "m", "fmt": 2},
             {"key": "dr_err", "label": "Dead-reckoning error", "unit": "m", "fmt": 2},
         ],
+        "watch": [
+            "The red ghost (dead reckoning) drifts away through the turns; the orange ghost (EKF) stays close.",
+            "The EKF is pulled back by a position fix every second and a compass reading every tick.",
+        ],
+        "provenance": _prov(
+            "The vehicle's path, speed and heading (KITTI Odometry ground truth).",
+            "The odometry, compass and position-fix noise, and both estimators. The road and buildings are "
+            "illustrative; only the path is from KITTI."),
     }
 
 
@@ -423,18 +600,23 @@ def _follower_scene() -> dict:
         "blurb": ("Behind the same recorded leader, our MPC-ACC car (blue) drives beside the recorded human "
                   "follower (orange, drawn one lane over). The human's gap is exact NGSIM data; ours is simulated."),
         "kind": "highway",
+        "ground": GRASS,
+        "grid": False,
         "dt": 0.1,
         "n": n,
         "outcome": {"label": "Ours vs recorded gap", "tone": "ok", "detail": (
             f"Mean gap {ours.mean():.1f} m for our controller and {theirs.mean():.1f} m for the human. "
             "Our car starts 15 m back and 1.5 m off center.")},
-        "road": {"centerline": _arr(run.centerline[:, :2], 2), "width": LANE_WIDTH, "offsets": [0, -LANE_WIDTH]},
+        "road": _highway_road(run.centerline, HIGHWAY_OFFSETS),
+        "props": scenery.highway_props(run.centerline, run.table, HIGHWAY_OFFSETS, LANE_WIDTH, seed=6),
         "tracks": {"ego": cut(run.ego), "lead": cut(run.lead), "human": _track(hx, hy, hth)},
         "vehicles": [
-            _car("ego", BLUE, "Our MPC-ACC car", steer="delta"),
-            {**_car("lead", GRAY, "Recorded leader"), "length": pair.leader.length, "width": 1.9},
-            {**_car("human", ORANGE, "Recorded human follower (next lane)"), "length": human.length, "width": 1.9},
+            _car("ego", BLUE, "Our MPC-ACC car", steer="delta", tag="Ours"),
+            {**_car("lead", GRAY, "Recorded leader", tag="Leader"), "length": pair.leader.length, "width": 1.9},
+            {**_car("human", ORANGE, "Recorded human follower (next lane)", tag="Human"), "length": human.length,
+             "width": 1.9},
         ],
+        "gap_pair": {"front": "lead", "rear": "ego", "key": "gap"},
         "trails": [{"track": "ego", "color": BLUE}, {"track": "human", "color": ORANGE}],
         "signals": {
             "v": _arr(r.ego_speed[:n]), "human_v": _arr(human.speed[:n]), "delta": _arr(r.ego_delta[:n], 4),
@@ -446,6 +628,13 @@ def _follower_scene() -> dict:
             {"key": "v", "label": "Our speed", "unit": "m/s", "fmt": 1},
             {"key": "human_v", "label": "Human speed", "unit": "m/s", "fmt": 1},
         ],
+        "watch": [
+            "Compare the two gaps in the panel: both cars follow the same leader through the same stop.",
+            "The orange car is the real driver; it is shown one lane over so the two cars do not overlap.",
+        ],
+        "provenance": _prov(
+            "The leader's and the human follower's motion, and the lane geometry (NGSIM US-101).",
+            "Our controller, its sensors and the EKF. The human is placed in the next lane for display only."),
     }
 
 
@@ -453,6 +642,8 @@ def _lane_scene() -> dict:
     offset, speed = 3.0, 20.0
     res = validate_lane_centering(initial_offset=offset, speed=speed)
     n = len(res.vehicle_x)
+    centerline = load_lane_centerline()
+    table = build_arc_length_table(centerline)
     return {
         "id": "ngsim-lane",
         "group": "Real data",
@@ -461,14 +652,17 @@ def _lane_scene() -> dict:
         "blurb": ("Stanley steering on a lane centerline derived from real NGSIM vehicle positions, "
                   f"starting {offset:.0f} m off center at {speed:.0f} m/s."),
         "kind": "lane",
+        "ground": GRASS,
+        "grid": False,
         "dt": 0.1,
         "n": n,
         "outcome": {"label": f"Settles to {res.max_cte_after_settling:.2f} m", "tone": "ok", "detail": (
             f"Largest offset after 150 m is {res.max_cte_after_settling:.2f} m. "
             f"Real drivers on this lane scatter {REAL_LATERAL_STD_M} m.")},
-        "road": {"centerline": _arr(res.path[:, :2], 2), "width": LANE_WIDTH},
+        "road": _highway_road(centerline, HIGHWAY_OFFSETS),
+        "props": scenery.highway_props(centerline, table, HIGHWAY_OFFSETS, LANE_WIDTH, seed=7),
         "tracks": {"ego": _track(res.vehicle_x, res.vehicle_y, res.vehicle_theta)},
-        "vehicles": [_car("ego", BLUE, "Ego vehicle", steer="delta")],
+        "vehicles": [_car("ego", BLUE, "Ego vehicle", steer="delta", tag="Ego")],
         "trails": [{"track": "ego", "color": BLUE}],
         "signals": {"v": _arr(np.full(n, speed)), "delta": _arr(res.delta, 4), "cte": _arr(res.cross_track_error, 3)},
         "hud": [
@@ -476,6 +670,12 @@ def _lane_scene() -> dict:
             {"key": "delta", "label": "Steering", "unit": "deg", "fmt": 1, "scale": 180 / np.pi},
             {"key": "cte", "label": "Lane offset", "unit": "m", "fmt": 2},
         ],
+        "watch": [
+            "The car steers hard at first and eases as it converges on the lane center.",
+            "The trail behind it shows the correction path back to center.",
+        ],
+        "provenance": _prov("The lane centerline, derived from real NGSIM vehicle positions.",
+                            "The car, the Stanley controller and the drive along the lane. The scenery is illustrative."),
     }
 
 
@@ -492,7 +692,9 @@ def build_scenes() -> list[dict]:
             "in place of MPC. Only the acceleration controller changes."),
         _stop_sign_scene,
         _four_way_scene,
+        _three_way_scene,
         _left_turn_scene,
+        _signalized_scene,
         _kitti_scene,
         _kitti_noisy_scene,
         _follower_scene,

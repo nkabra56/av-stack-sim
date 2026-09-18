@@ -4,13 +4,16 @@ import numpy as np
 
 from core.validation.ngsim_loader import load_following_pair
 from core.visualization.web_export import (
+    _follow_scene,
     _four_way_scene,
     _kitti_noisy_scene,
     _kitti_scene,
     _lane_scene,
     _left_turn_scene,
     _parking_scene,
+    _signalized_scene,
     _stop_sign_scene,
+    _three_way_scene,
 )
 
 
@@ -26,6 +29,14 @@ def _assert_consistent(scene):
             assert set(scene["signals"][stat["key"]]) <= set(range(len(stat["labels"])))
     for vehicle in scene["vehicles"]:
         assert vehicle["track"] in scene["tracks"]
+        assert "visible" not in vehicle or len(scene["signals"][vehicle["visible"]]) == n
+    for prop in scene.get("props", []):
+        assert "key" not in prop or prop["key"] in scene["signals"]
+    if "gap_pair" in scene:
+        tracks = {v["track"] for v in scene["vehicles"]}
+        assert {scene["gap_pair"]["front"], scene["gap_pair"]["rear"]} <= tracks
+        assert scene["gap_pair"]["key"] in scene["signals"]
+    assert scene["provenance"]["real"] and scene["provenance"]["simulated"]
     json.dumps(scene)
 
 
@@ -86,3 +97,33 @@ def test_recorded_follower_aligns_with_the_recorded_leader():
     n = min(len(pair.leader.position), len(pair.follower.position))
     implied_gap = pair.leader.position[:n] - pair.leader.length - pair.follower.position[:n]
     assert np.allclose(implied_gap, pair.real_space_headway[:n], atol=0.01)
+
+
+def test_signalized_scene_lights_follow_the_plan_and_drive_the_signal_heads():
+    scene = _signalized_scene()
+    _assert_consistent(scene)
+    ns, ew = scene["signals"]["sig_ns"], scene["signals"]["sig_ew"]
+    assert set(ns) | set(ew) <= {0, 1, 2}
+    assert all(a == 2 or b == 2 for a, b in zip(ns, ew, strict=True))  # never conflicting greens or yellows
+    heads = [p for p in scene["props"] if p["type"] == "signal"]
+    assert len(heads) == 4 and {h["key"] for h in heads} == {"sig_ns", "sig_ew"}
+    assert scene["outcome"]["label"] == "No red-light entries"
+
+
+def test_three_way_scene_has_no_south_leg():
+    scene = _three_way_scene()
+    _assert_consistent(scene)
+    assert len(scene["decor"]["strips"]) == 3
+    assert len([p for p in scene["props"] if p["type"] == "stop_sign"]) == 3
+    assert scene["decor"]["boxes"][0]["y"] > 0  # the paved box is shifted toward the legs that exist
+
+
+def test_highway_scene_has_lane_markings_rails_and_background_traffic():
+    scene = _follow_scene("t", "idm", "t", "s", "b")
+    _assert_consistent(scene)
+    assert len(scene["road"]["offsets"]) == 3
+    kinds = {p["type"] for p in scene["props"]}
+    assert {"rail", "tree", "gantry"} <= kinds
+    background = [v for v in scene["vehicles"] if v["track"].startswith("bg")]
+    assert len(background) == 10
+    assert all(set(scene["signals"][v["visible"]]) <= {0, 1} for v in background)
