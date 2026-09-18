@@ -429,11 +429,13 @@ selectable per scenario via `demo.py --controller mpc`.
   inside the obstacle's circle. "Fails safe" therefore holds under the simulator's collision model,
   not for the drawn footprint.
 - The highway harness locates the ego by projecting onto the nearest centerline waypoint (waypoints are
-  2 m apart), so its reported gap and `min_gap` carry up to 1 m of quantization error. On the two
-  viewer runs (seed 1) the geometric minimum gap is 2.8 m for MPC-ACC and 2.5 m for IDM against 1.8 m
-  reported by the harness, so the reported figure was conservative there. The viewer draws and reports
-  the geometric gap. Whether the quantization can hide a true overlap in other configurations has not
-  been checked.
+  2 m apart), so its reported gap and `min_gap` carry up to 1 m of quantization error. Across the
+  configurations in `tests/test_full_highway.py` (IDM and MPC-ACC, seeds 1 to 3) the geometric minimum gap is
+  2.5 to 2.8 m against 1.8 m reported, the reported gap exceeds the geometric one by at most 1.0 m, and no tick
+  has a geometric gap at or below zero. Because the error is bounded by 1 m, a run reporting more than 1 m
+  cannot hide an overlap; the tests only assert `min_gap > 0`, so a run reporting less than 1 m could. The 1D
+  harness behind `acc_validation` integrates the ego position directly and has no such error. The viewer
+  draws and reports the geometric gap.
 - The signalized-intersection scene (`core/signalized_intersection.py`) is a fixed-time plan with straight-through
   IDM cars only: no turns, pedestrians, actuated timing, or vehicles blocking the box. A car brakes for a yellow only
   if it cannot clear the line first and can stop at 4.5 m/s². It is a demonstration of queueing and safety, not a

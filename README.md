@@ -10,7 +10,7 @@ for **parking** (Dubins, Reeds-Shepp, Hybrid A*, Pure Pursuit, MPC) and **highwa
 node graph and one Extended Kalman Filter, and are validated against real KITTI and NGSIM
 driving data rather than synthetic noise alone.
 
-**[Open the interactive 3D viewer](https://nkabra56.github.io/av-stack-sim/viewer/)**: twelve
+**[Open the interactive 3D viewer](https://nkabra56.github.io/av-stack-sim/viewer/)**: fourteen
 replayable runs in your browser, no install.
 
 ![perpendicular parking demo](docs/media/perpendicular_open.gif)
@@ -93,7 +93,7 @@ Tick order and the full diagram: [DESIGN.md](DESIGN.md#2-system-architecture).
 - **An RL baseline.** A PPO policy trained in a Gymnasium environment parks without collisions
   across 5 seeds on the open and flanked lots, and is compared with the planner and controller
   stack on success, collisions, and steps ([provenance](core/data/rl/PROVENANCE.md)).
-- **Tested and modular.** 303 tests (299 pass out of the box, 4 need the `rl` or `viz` extras),
+- **Tested and modular.** 312 tests (299 run on a base install; 13 more in 4 modules need the `rl` or `viz` extras),
   ruff-clean, with planners, controllers, and nodes swappable behind common interfaces.
 
 Reasoning and tradeoffs: [DESIGN.md](DESIGN.md). Module breakdown, milestones, and testing:
@@ -121,7 +121,7 @@ validation is simulated on top of it.
 
 ```bash
 pip install -e ".[dev]"
-pytest                                                          # 299 pass, 4 more need `rl`/`viz`
+pytest                                                          # 299 pass; 13 more tests need `rl`/`viz`
 ruff check core tests                                           # lint
 
 # Parking
@@ -143,7 +143,7 @@ PyYAML, pytest, ruff; optional Gymnasium and Stable-Baselines3 (`rl`), Foxglove 
 ## Docker
 
 ```bash
-docker build -t auto-park .                 # core sim and tests
+docker build -t auto-park --target base .   # core sim and tests
 docker run --rm auto-park                   # runs the test suite
 docker run --rm -v "$PWD/out:/app/out" auto-park python -m core.demo perpendicular_open --save out/demo.gif
 
@@ -166,7 +166,9 @@ Game Bar. Setup steps are in [FOXGLOVE_TESTING_GUIDE.md](FOXGLOVE_TESTING_GUIDE.
 
 ```
 core/
-  vehicle.py, environment.py, scenario_loader.py   # bicycle model, lot geometry, scenarios/*.yaml
+  vehicle.py, environment.py, sensors.py, interfaces.py, scenario_loader.py   # bicycle model, lot, sensors, Planner and
+                       # Controller protocols, scenarios/*.yaml
+  demo.py              # CLI: run a scenario, save a GIF, or export for Foxglove
   messaging/           # Bus and typed messages (the pub/sub backbone)
   estimation/          # ekf.py (3-state parking, 4-state speed-estimating), ukf.py
   planning/            # dubins.py, reeds_shepp.py, hybrid_astar.py
@@ -198,5 +200,5 @@ Milestone history: [IMPLEMENTATION.md](IMPLEMENTATION.md#3-milestones).
 
 ## Data and license
 
-Code is MIT ([LICENSE](LICENSE)). The KITTI excerpt (CC BY-NC-SA 3.0) and the NGSIM excerpts are
+Code is MIT ([LICENSE](LICENSE)). The KITTI excerpt (CC BY-NC-SA 3.0) and the NGSIM excerpts (CC BY-SA 3.0) are
 redistributed with attribution in `core/data/*/ATTRIBUTION.md`.

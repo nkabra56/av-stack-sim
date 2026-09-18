@@ -404,12 +404,12 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   parallel-parking maneuver) and inspecting individual frames: the speed panel shows the governor's
   real oscillation during a tight reverse-forward sequence, and the sensor panel visibly shortens a
   beam exactly when the vehicle is close to an obstacle in that beam's direction, not just at rest.
-- **M6 (Tests)**: 303 tests across both modes run in ~380s. The 4 that need the optional `rl`/`viz`
+- **M6 (Tests)**: 312 tests across both modes run in ~380s. The 13 in 4 modules that need the optional `rl`/`viz`
   extras skip via `pytest.importorskip`, so 299 run on a base install.
 
 ## 4. Testing strategy
 
-Current (303 tests, ~380s: up from ~100s pre-H5, almost entirely because `test_full_highway.py`
+Current (312 tests, ~380s: up from ~100s pre-H5, almost entirely because `test_full_highway.py`
 replays a real 78s/780-frame NGSIM trajectory through the full node graph, parametrized over
 multiple controllers and seeds; the M2-era jump from ~20s to ~100s is explained in
 IMPLEMENTATION.md's M2 section above):
