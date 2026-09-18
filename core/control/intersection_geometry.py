@@ -1,5 +1,5 @@
 """Real 2D geometry for a 4-way intersection: perpendicular approaches, a real conflict-zone
-box, and heading-based right-of-way: `control/intersection.py`'s single-conflict-point
+box, and heading-based right-of-way. `control/intersection.py`'s single-conflict-point
 model can't represent this. See KNOWN_BUGS.md entry 4 / DESIGN.md section 12."""
 
 import math
@@ -74,8 +74,8 @@ def turn_exit_heading(entry_heading: float, turn: Turn) -> float:
         return wrap_angle(entry_heading + math.pi / 2)
     if turn == "right":
         return wrap_angle(entry_heading - math.pi / 2)
-    # A typo used to silently fall through to the right-turn branch instead of failing
-    # loudly: caught in code review, not by any test.
+    # A typo used to silently fall through to the right-turn branch instead of failing loudly.
+    # It was caught in code review, not by any test.
     raise ValueError(f"turn must be 'straight', 'left', or 'right', got {turn!r}")
 
 

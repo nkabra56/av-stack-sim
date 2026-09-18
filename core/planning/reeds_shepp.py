@@ -9,8 +9,8 @@ from core.planning.dubins import _csc_points, _mod2pi, _solve_csc, _walk_segment
 
 
 def _turn_center(pose: Pose, radius: float, left: bool) -> tuple[float, float]:
-    """Center of the circle a vehicle at `pose` traces turning `left`/right at `radius`
-: same center `_arc_points` computes internally, exposed here for CCC's geometry."""
+    """Center of the circle a vehicle at `pose` traces turning `left`/right at `radius`.
+    Same center `_arc_points` computes internally, exposed here for CCC's geometry."""
     x, y, theta = pose
     direction = 1.0 if left else -1.0
     return x - direction * radius * np.sin(theta), y + direction * radius * np.cos(theta)
@@ -80,7 +80,7 @@ def _solve_ccc(
 def _ccc_points(
     start: Pose, first: str, mid: str, last: str, t: float, p: float, q: float, turning_radius: float, step: float = 0.1
 ) -> np.ndarray:
-    """CCC's analog of `_csc_points`, all three legs are turns, no straight segment
+    """CCC's analog of `_csc_points`: all three legs are turns, no straight segment
     (see `_walk_segments`, shared with dubins.py's CSC composer)."""
     return _walk_segments(start, [(first, t), (mid, p), (last, q)], turning_radius, step)
 
@@ -140,7 +140,7 @@ class ReedsSheppPlanner:
             raise RuntimeError(
                 f"No Reeds-Shepp candidate (CSC or CCC) feasible for start={start}, goal={goal}, "
                 f"turning_radius={turning_radius}. Not observed in practice for any start/goal "
-                f"pair (see module docstring), if this actually triggers, it's a new finding "
+                f"pair (see module docstring); if this actually triggers, it's a new finding "
                 f"worth its own KNOWN_BUGS.md entry, not the CCC gap this exception used to guard."
             )
         return path

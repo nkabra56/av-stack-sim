@@ -98,8 +98,8 @@ def _solve_csc(
 def _walk_segments(
     start: Pose, seg_defs: list[tuple[str, float]], turning_radius: float, step: float
 ) -> np.ndarray:
-    """Walk a (kind, magnitude) segment list from start, sampling at fixed arc-length
-    `step`: shared by dubins.py's CSC composer and reeds_shepp.py's CCC composer."""
+    """Walk a (kind, magnitude) segment list from start, sampling at fixed arc-length `step`.
+    Shared by dubins.py's CSC composer and reeds_shepp.py's CCC composer."""
     seg_lengths = np.array([mag if kind == "S" else turning_radius * mag for kind, mag in seg_defs])
     total = seg_lengths.sum()
     counts = np.maximum(2, np.round(seg_lengths / step).astype(int)) if total > 1e-9 else [2] * len(seg_defs)

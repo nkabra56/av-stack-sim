@@ -20,7 +20,7 @@ class PurePursuitAdaptive:
         dists = np.hypot(path[:, 0] - pose.x, path[:, 1] - pose.y)
         nearest = int(np.argmin(dists))
 
-        # Search forward from the nearest point, not index 0, scanning the whole array
+        # Search forward from the nearest point, not index 0: scanning the whole array
         # re-selects the path's start point once the vehicle is past it, yanking the target back.
         ahead = np.where(dists[nearest:] >= self.lookahead)[0]
         target_idx = nearest + ahead[0] if len(ahead) else len(path) - 1

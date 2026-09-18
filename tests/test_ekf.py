@@ -72,8 +72,8 @@ def test_predict_grows_covariance():
 
 
 def test_update_landmark_on_top_of_the_landmark_does_not_produce_nan():
-    """Code-review finding: the measurement Jacobian divides by range_pred and q, unguarded
-, landing exactly on a landmark used to blow up toward Inf/NaN with no recovery."""
+    """Code-review finding: the measurement Jacobian divides by range_pred and q, unguarded;
+    landing exactly on a landmark used to blow up toward Inf/NaN with no recovery."""
     ekf = _ekf()
     ekf.x[:2] = [5.0, 1.0]
     ekf.update_landmark(0.0, 0.0, (5.0, 1.0))  # estimate sits exactly on the landmark

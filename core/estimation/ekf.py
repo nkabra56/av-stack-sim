@@ -58,9 +58,8 @@ class ExtendedKalmanFilter:
         self.p = f @ self.p @ f.T + q
 
     def predict_with_speed_state(self, accel: float, delta: float, dt: float) -> None:
-        """4-state predict (H2): control input is acceleration, v is an estimated state,
-        not perfect odometry. Propagates using v_new = v + accel*dt, matching Vehicle.update
-, using the prior v instead caused a real, initially-invisible heading-bias bug."""
+        """4-state predict (H2): control input is acceleration and v is an estimated state, not odometry.
+        Propagates with v_new = v + accel*dt, as Vehicle.update does; using the prior v caused a heading-bias bug."""
         x, y, theta, v = self.x
         v_new = v + accel * dt
         dtheta = (v_new / self.wheelbase) * np.tan(delta) * dt
