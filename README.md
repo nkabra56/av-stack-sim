@@ -30,6 +30,10 @@ the real KITTI trajectory with the EKF plotted against dead reckoning. Switch be
 overview, and top-down cameras, scrub or speed up playback, and toggle the planned path, trails,
 sensor rays, EKF uncertainty, and the simulator's collision circle.
 
+| Parking: reverse cusp between two cars (Hybrid A* + MPC) | Real KITTI drive: EKF vs. dead reckoning |
+|---|---|
+| ![3D viewer, parallel parking](docs/media/viewer_parking.png) | ![3D viewer, KITTI drive](docs/media/viewer_kitti.png) |
+
 ```bash
 python -m core.visualization.web_export                 # re-run the scenarios, write docs/viewer/scenes.js
 python -m http.server 8000 --directory docs/viewer      # then open http://localhost:8000
