@@ -1,6 +1,6 @@
 This license covers the project's own code. It does NOT cover the third-party data under
-`core/data/kitti/`, which is redistributed under a separate, more restrictive license
-(CC BY-NC-SA 3.0, non-commercial): see `core/data/kitti/ATTRIBUTION.md`.
+`core/data/kitti/` (CC BY-NC-SA 3.0, non-commercial) or `core/data/ngsim/` (CC BY-SA 3.0),
+which are redistributed under their own licenses: see the `ATTRIBUTION.md` in each directory.
 
 MIT License
 
