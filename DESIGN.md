@@ -34,19 +34,7 @@ shallow attempt at everything a real AV company's stack does.
 The system is a small **pub/sub node graph** (topics + typed messages, no real ROS2 dependency)
 rather than one component calling the next directly:
 
-```mermaid
-flowchart LR
-    VN[VehicleNode<br/>ground truth + odometry] -- true_state --> SN[SensorNode]
-    VN -- odometry --> EN[EstimatorNode<br/>EKF]
-    SN -- compass --> EN
-    SN -- position_fix --> EN
-    SN -- landmark_bearings --> EN
-    EN -- pose_estimate --> PN[PlannerNode<br/>Dubins / Reeds-Shepp / Hybrid A*]
-    EN -- pose_estimate --> CN[ControllerNode<br/>Pure Pursuit / MPC]
-    PN -- path --> CN
-    SN -- obstacle_ranges --> CN
-    CN -- control_cmd --> VN
-```
+<p align="center"><img src="docs/media/architecture.png" alt="Node graph: VehicleNode (ground truth, red) sends true_state only to SensorNode. EstimatorNode receives odometry and sensor readings and publishes pose_estimate to PlannerNode and ControllerNode. PlannerNode sends a path to ControllerNode, which sends control_cmd back to VehicleNode." width="520"></p>
 
 Two properties of this graph matter more than the fact that it's "pub/sub" at all:
 

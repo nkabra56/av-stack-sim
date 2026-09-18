@@ -1,0 +1,15 @@
+flowchart TB
+    VN["VehicleNode<br/>ground truth"] -- true_state --> SN[SensorNode]
+    VN -- odometry --> EN["EstimatorNode<br/>ExtendedKalmanFilter"]
+    SN -- "compass / position_fix<br/>/ landmark_bearings" --> EN
+    EN -- pose_estimate --> PN["PlannerNode<br/>Dubins / Reeds-Shepp / Hybrid A*"]
+    EN -- pose_estimate --> CN["ControllerNode<br/>Pure Pursuit / MPC"]
+    PN -- path --> CN
+    SN -- obstacle_ranges --> CN
+    CN -- control_cmd --> VN
+
+    style VN fill:#fde2e2,stroke:#c0392b
+    style SN fill:#e2f0fd,stroke:#2980b9
+    style EN fill:#e2f0fd,stroke:#2980b9
+    style PN fill:#e2f0fd,stroke:#2980b9
+    style CN fill:#e2f0fd,stroke:#2980b9
