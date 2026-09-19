@@ -10,17 +10,13 @@ that dynamically follows/zooms on the vehicle**, built with **Foxglove** (the ro
 visualization tool), so they can record a polished demo video for LinkedIn.
 
 This is additive: `core/harness.py` and all planning/control/estimation code stay untouched,
-it already produces a rendering-agnostic `SimulationResult`. `animate.py` and the default
+since `harness.py` already produces a rendering-agnostic `SimulationResult`. `animate.py` and the default
 `python -m core.demo ...` behavior (GIF/interactive matplotlib) are not modified or removed;
 Foxglove export is a new, opt-in path alongside it.
 
-Key caveat discovered during research (docs.foxglove.dev): Foxglove's built-in "Export
-video" feature is **Enterprise-plan + desktop-app only**. On the free tier there is no
-programmatic video export. The realistic path to an actual LinkedIn-ready video file is:
-generate the `.mcap` → open it in the free Foxglove desktop app with a follow-camera layout
-→ hit play → **screen-record the app window** (OBS Studio, Windows Game Bar, etc.) → trim if
-needed. This plan builds everything up to and including "press play with the right layout
-loaded"; the final screen-capture step is manual and out of scope for automation.
+Key caveat: Foxglove's built-in video export is Enterprise-only, so the final video is a manual screen
+recording of the desktop app (see FOXGLOVE_TESTING_GUIDE.md section 7). This plan builds everything up
+to pressing play with the right layout loaded.
 
 ## Approach
 
@@ -46,13 +42,13 @@ Scene content, all logged via `foxglove.open_mcap(save_path)` (optionally also
   "parked car" height, same license `animate.py` takes drawing them as flat circles).
 - **Vehicle**: a body box (`VEHICLE_LENGTH × VEHICLE_WIDTH`) + smaller cabin box, published in
   a `"vehicle"` child frame; pose driven per-tick by a `FrameTransform` (`world` → `vehicle`,
-  yaw-only quaternion from `true_history[i]`), this is also the frame the follow-camera
+  yaw-only quaternion from `true_history[i]`); this is also the frame the follow-camera
   layout targets, so the car geometry itself never needs per-tick recomputation.
 - **Trails**: true (`true_history`) and EKF-estimated (`estimated_history`) paths as two
   distinctly colored growing `LinePrimitive`s, re-logged in full each tick (Foxglove
   primitives aren't append-only).
 - **Uncertainty ellipse**: reuse `_ellipse_params(cov_xy)` unmodified, sample it into a closed
-  ring of points rendered as a `LinePrimitive`, avoids depending on an unverified
+  ring of points rendered as a `LinePrimitive`, which avoids depending on an unverified
   ellipsoid-primitive schema.
 - **Sensor rays**: one short `LinePrimitive` per ultrasonic beam, from the vehicle out to its
   current range reading at `theta + beam_angle`, color-graded red (close) → green (clear),
@@ -83,7 +79,7 @@ from foxglove.messages import (Color, CubePrimitive, LinePrimitive, SceneEntity,
 ### 2. `pyproject.toml`: new optional extra
 
 Add a `viz` extra, following the exact precedent already set by `rl = ["gymnasium", "stable-baselines3"]`
-(pyproject.toml:23), a short comment explaining it's opt-in, not core, same rationale:
+(pyproject.toml:23), with a short comment explaining it's opt-in, not core, for the same reason:
 ```toml
 viz = ["foxglove-sdk"]
 ```
@@ -97,27 +93,22 @@ non-conflated backends):
 parser.add_argument("--foxglove", metavar="PATH.mcap", help="Export a 3D scene for Foxglove instead of the matplotlib animation (needs `pip install -e \".[viz]\"`)")
 ```
 Branch after `harness.run(...)` (`core/demo.py:60-69`): if `--foxglove` is given, lazily
-`import` and call `render_foxglove(...)` instead of `render_animation(...)`, the lazy import
+`import` and call `render_foxglove(...)` instead of `render_animation(...)`. The lazy import
 means the default `python -m core.demo ...` path never imports `foxglove-sdk` even if it
 isn't installed. Mutually exclusive with `--save`/default animation, matching the "instead of"
 framing.
 
 ### 4. New file: `foxglove-layouts/parking_demo.json` (follow-camera layout)
 
-Not hand-authored. Manual one-time step: generate an `.mcap`, open it in the free Foxglove
-desktop app, add a 3D panel, set its follow mode to Position+Rotation targeting the `vehicle`
-frame, add Plot panel(s) wired to `/speed.*` and `/sensors.*`, then export the layout JSON via
-the app and commit it at this path. This is how "dynamic follow/zoom" gets satisfied: a
-configured camera-follow setting, not custom camera-path code.
+Not hand-authored: it is exported from the Foxglove app and committed at this path, following the steps in
+FOXGLOVE_TESTING_GUIDE.md section 5. Camera-follow is a configured layout setting, not custom
+camera-path code.
 
 ### 5. `README.md`
 
 Add a Quickstart line (`pip install -e ".[viz]"` then `python -m core.demo perpendicular_open --foxglove out/demo.mcap`)
-and a short new "3D visualization (Foxglove)" subsection: install the free Foxglove desktop
-app (separate manual install, not automated here), open the `.mcap`, load the committed
-layout, hit play, and screen-record the window for a LinkedIn video, explicitly noting
-Foxglove's built-in video export is Enterprise-only and doesn't apply. No Docker or ffmpeg
-changes needed (ffmpeg stays relevant only to the existing, untouched `--save out.gif` path).
+and a short "3D visualization (Foxglove)" subsection pointing to FOXGLOVE_TESTING_GUIDE.md. No Docker or
+ffmpeg changes needed (ffmpeg stays relevant only to the existing, untouched `--save out.gif` path).
 
 ### 6. Tests: `tests/test_foxglove_export.py`
 

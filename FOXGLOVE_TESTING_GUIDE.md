@@ -28,7 +28,7 @@ You should see two lines of output: the usual status line (`reached spot in N
 steps`) and `Foxglove scene written to out/demo.mcap (...)`. `out/demo.mcap` should
 be non-trivial in size (tens to hundreds of KB depending on run length).
 
-Worth generating a couple of scenarios so you have options for the video: the
+Worth generating a couple of scenarios so you have options for the video, since the
 "cleanest"-looking run is usually one that actually reaches the spot without
 stalling:
 
@@ -47,7 +47,7 @@ gives a different noise realization of the same scenario if you want to re-roll 
 Download from **https://foxglove.dev/download** (Windows installer). I didn't find a
 verified `winget` package id for it, so grab it from that page directly rather than
 guessing at a package manager command. The free tier covers everything in this guide
-except the built-in video exporter (see step 6).
+except the built-in video exporter (see step 7).
 
 ## 4. Open the file
 
@@ -78,13 +78,13 @@ default layout with an empty/auto-picked panel. Next steps configure it properly
 
 ### 5c. Status (optional)
 
-Add a panel → **Raw Messages**, point it at `/status`: shows the scenario/planner/
+Add a panel → **Raw Messages**, point it at `/status`; it shows the scenario/planner/
 controller info at the start and the success/collision result at the end.
 
 ### 5d. Arrange and save the layout
 
 Drag panel edges so the 3D view is the dominant panel (e.g. left ~65%, plots stacked
-on the right ~35%: mirrors the old Matplotlib panel proportions). Then:
+on the right ~35%, which mirrors the old Matplotlib panel proportions). Then:
 
 - Layout menu → **Export layout** (or right-click the layout in the sidebar → Export)
   → save the JSON.
@@ -98,7 +98,7 @@ Hit the play button on the timeline at the bottom. Things to check:
 
 - The car visibly drives from its start pose into the parking spot along a smooth
   path.
-- The camera follows it (doesn't stay static or drift oddly, if it does, re-check the
+- The camera follows it (it doesn't stay static or drift oddly; if it does, re-check the
   follow-frame/follow-mode setting from step 5a).
 - The blue (true) and orange (estimated) trails both grow, with a visible gap between
   them representing EKF estimation error.
@@ -125,7 +125,7 @@ path on the free tier is screen-recording the app window during playback:
 1. `Win + G` to open Game Bar with the Foxglove window focused.
 2. Open the Capture widget, click the record button (or `Win + Alt + R`).
 3. Press play in Foxglove, let it run through, `Win + Alt + R` again to stop.
-4. Recording lands in `Videos\Captures\` as an `.mp4`: already LinkedIn-ready format.
+4. Recording lands in `Videos\Captures\` as an `.mp4`, which is already a LinkedIn-ready format.
 
 **Option B: OBS Studio (free, more control over framing/quality)**
 1. Install from https://obsproject.com/.
@@ -134,7 +134,7 @@ path on the free tier is screen-recording the app window during playback:
 3. Settings → Output: set format to `mp4`, a reasonable bitrate (8–12 Mbps for 1080p
    is plenty for LinkedIn).
 4. Settings → Video: set canvas/output resolution to 1920x1080 if you can size the
-   Foxglove window to roughly 16:9 first, cleaner crop, no letterboxing.
+   Foxglove window to roughly 16:9 first, which gives a cleaner crop with no letterboxing.
 5. Start Recording, press play in Foxglove, let it finish, Stop Recording.
 
 Before recording either way: resize/maximize the Foxglove window to a clean 16:9-ish
@@ -147,8 +147,8 @@ before you actually hit record.
 If you need to trim dead time at the start/end or add a title card, Windows 11's
 built-in **Clipchamp** app (Start menu → search "Clipchamp") handles basic trims/text
 overlays without installing anything extra. If you'd rather script it and have/install
-ffmpeg (`winget install ffmpeg` or https://ffmpeg.org/download.html, not currently on
-this machine's PATH), a trim is one command:
+ffmpeg (not currently on this machine's PATH; get it with `winget install ffmpeg` or
+https://ffmpeg.org/download.html), a trim is one command:
 
 ```bash
 ffmpeg -i input.mp4 -ss 00:00:02 -to 00:00:18 -c copy trimmed.mp4
@@ -160,7 +160,7 @@ ffmpeg -i input.mp4 -ss 00:00:02 -to 00:00:18 -c copy trimmed.mp4
   muted in-feed, so keep it visually clear without relying on audio.
 - Landscape 16:9 (1920x1080) or square 1:1 both work well in-feed; square uses more
   vertical scroll space on mobile if that matters to you.
-- LinkedIn allows up to 10 minutes, but a demo like this reads best short, aim for
+- LinkedIn allows up to 10 minutes, but a demo like this reads best short: aim for
   15–45 seconds, looping the cleanest single parking maneuver rather than stitching
   every scenario together.
 - A short caption on the post explaining what's being shown (EKF estimate vs. ground

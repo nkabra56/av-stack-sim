@@ -27,16 +27,8 @@ default, and every existing scenario/test runs with it off.
 this combination unconditionally. What's left is a genuine, permanent scope limitation, not a safety
 bug: this combination still never *succeeds* (`tests/test_simulation.py`'s `NEVER_SUCCEEDS`,
 pinned by `test_parallel_between_cars_pure_pursuit_fails_safe_not_success`).
-**Root cause found while fixing the collision**: the old brake mechanism
-(`hybrid_astar.brake_distance_for`) computed a fixed trigger distance from the planner's own
-clearance floor (`vehicle_radius + safety_margin - buffer`), with its default `buffer` equal to
-`safety_margin`, this collapsed to *exactly* `vehicle_radius`, i.e. the literal collision boundary,
-so the brake fired at the moment of contact rather than before it, for any speed. It wasn't
-sufficient on its own to fix, either: a real physics-based stopping-distance formula
-(`v_allowed = sqrt(2*a_max*gap)`, now `ControllerNode._safe_speed`) still requires enough stopping
-buffer that it can't fit inside Hybrid A*'s ~0.15m intentional-clearance band at anything close to
-`v_max` without also throttling speed continuously as the vehicle approaches an obstacle, which is
-what the fix now does.
+**Root cause found while fixing the collision**: a brake trigger that collapsed to the collision radius,
+replaced by a continuous speed governor (`ControllerNode._safe_speed`). See DESIGN.md section 6's M2 entry.
 **What happens now**: Pure Pursuit's already-documented "no margin once curvature is at the
 vehicle's limit" weakness (DESIGN.md section 7) still means it can't track this scenario's
 curvature-saturated, obstacle-hugging reverse-gear cusp, but instead of the tracking error running
@@ -45,7 +37,7 @@ real parameter sweep (lookahead, v_max, and an adaptive-lookahead variant tried 
 this) confirmed it isn't a Pure-Pursuit-tuning problem: nothing in that space lets it both stay clear
 of the obstacle and keep converging. MPC's constraint-respecting rollout never needed the governor
 here; it stays collision-free and converges reliably on its own (5/5, up to ~880 steps).
-**Caveat**: "fails safe" is measured with the simulator's 1.0 m collision circle. Against the drawn
+**Caveat**: "fails safe" is measured with the simulator's 1.0 m radius collision circle. Against the drawn
 4.5 m body, the stopped nose overlaps the obstacle by about 1.2 m (DESIGN.md section 9).
 **What would actually close it**: either give Pure Pursuit a fundamentally different (non-reactive)
 fallback for curvature-saturated regimes, or accept this as a permanent, documented controller
@@ -59,8 +51,8 @@ described as open, now with the collision risk removed either way.
 **Where**: `core/nodes/controller_node.py` (stall detection -> `replan_request`, tracking-aware
 buffer) / `core/nodes/planner_node.py` (re-plans against the live obstacle list) / `core/harness.py`
 (derives the tracked buffer from the active planner).
-**Status**: closed. The original bug: `PlannerNode` plans once and never again, so `ControllerNode`
-braking on an unplanned obstacle just left the vehicle stopped indefinitely, was fixed first (see
+**Status**: closed. The original bug (`PlannerNode` plans once and never again, so `ControllerNode`
+braking on an unplanned obstacle just left the vehicle stopped indefinitely) was fixed first (see
 above); a real residual then showed up while testing that fix: in
 `test_replanning_produces_a_materially_different_obstacle_avoiding_path`, the vehicle would stall,
 trigger a correct re-plan, get a valid detour back, and immediately stall again at the *start* of
@@ -78,7 +70,7 @@ from `getattr(planner, "safety_margin", None)`: planners with no exposed clearan
 (Dubins/ReedsShepp, both obstacle-blind) automatically get `None` and keep the fully conservative
 buffer unconditionally, since they never earned a smaller one.
 **Real finding from a real parameter sweep** (not picked by eye): the naive-sounding threshold
-(0.3m, "well under entry 2's ~0.66m collision-point error") *reopened* entry 2's collision outright,
+(0.3m, "well under entry 2's ~0.66m collision-point error") *reopened* entry 2's collision outright;
 by the time cross-track error reaches even 0.1-0.15m, the vehicle is already well into the
 dangerous divergence, not still safely on-plan. The threshold had to be tight enough that the
 tracking/not-tracking classification is essentially never wrong, not just usually right. Swept
@@ -110,13 +102,14 @@ to check more than two approaches, no geometric verification that right-of-way r
 prevents a collision) was closed first (real 2D layout, `is_to_the_right` derived from actual
 travel headings, real circle-to-circle proximity checking instead of trusting arrival-order
 bookkeeping alone; a real finding along the way: the conflict-zone/lane-offset/stop-margin constants
-aren't independent of `VEHICLE_RADIUS`, since an under-sized intersection can put a vehicle waiting
-at its own stop line within collision range of the perpendicular through-lane). Turning movements
+aren't independent of `VEHICLE_RADIUS`: the first version's `conflict_half_width=4.0` against
+`lane_offset=3.0` put a vehicle waiting at its own stop line 2.97 m from the perpendicular through-lane,
+under the 5.0 m two-radius collision threshold). Turning movements
 were then added on top: a vehicle with `turn != "straight"` drives its entry approach's straight
 lane, a real curved connector reusing `DubinsPlanner` (`build_turn_path`), then the exit approach's
 straight lane, and left turns yield to oncoming (opposite-approach) straight-through traffic that
-hasn't cleared: the one right-of-way rule `IntersectionNavigator`'s pure arrival-order model can't
-express on its own, added at the harness level as an extra phantom `OtherVehicleStatus` rather than
+hasn't cleared. That is the one right-of-way rule `IntersectionNavigator`'s pure arrival-order model can't
+express on its own, so it is added at the harness level as an extra phantom `OtherVehicleStatus` rather than
 by modifying `IntersectionNavigator` itself.
 **Two real bugs found and fixed while adding turning movements**, both via a random mixed-turn sweep
 (varying start distances and turn assignments across all four approaches, hundreds of trials) rather
@@ -150,7 +143,7 @@ than the hand-picked two-vehicle scenarios that had looked correct in isolation:
    first) extended to right-turners too: since the phantom rule only ever fires for a *left*-turner
    yielding to a *straight* vehicle, exempting right-turners left them with no mutual-exclusion
    mechanism against an opposing left-turner at all, and the sweep caught real collisions on that
-   specific pairing: reverted to only exempting straight vehicles. A third fix was needed even after
+   specific pairing, so the exemption was reverted to straight vehicles only. A third fix was needed even after
    the deadlock was gone: the phantom rule originally only engaged once the oncoming vehicle had left
    `APPROACHING` state (stopped or already proceeding), but "still approaching" only means "hasn't
    reached its own stop line yet," not "far away and safe to ignore"; a vehicle at full cruise speed
@@ -162,18 +155,18 @@ than the hand-picked two-vehicle scenarios that had looked correct in isolation:
    favors safety over throughput, consistent with the rest of this project.
 **Verified**: a 400-trial random sweep (random start distances 60-140m, random turn assignment per
 approach) after all three fixes: 0 collisions. `tests/test_intersection_geometry.py` adds direct
-regression coverage, turn exit heading/position correctness, the left-yields-to-oncoming-despite-
+regression coverage: turn exit heading/position correctness, the left-yields-to-oncoming-despite-
 earlier-arrival case and its clearing-early control case, confirmation right-turners don't get the
 special rule, curvature-limit/path-length checks on all 8 (approach x direction) turn geometries, and
 a 60-trial version of the sweep itself.
-**Known, accepted residual: a liveness limitation, not a safety one**: the same 400-trial sweep
+**Known, accepted residual (a liveness limitation, not a safety one)**: the same 400-trial sweep
 still hits the step budget (never resolves) in ~8% of trials. Confirmed genuinely permanent (still
 stuck at 10x the step budget, not just slow) and confirmed safe (never a collision in any case
 observed). Root cause: the left-turn yield rule is deliberately unconditional/arrival-order-
 independent (that's the real right-of-way rule), and combined with ordinary arrival-order yielding
 among the *other* vehicles present, this can form a genuine N-vehicle wait cycle (e.g. a 3-way cycle:
 a left-turner waits on its unconditional opposite, which waits on a third vehicle that arrived
-earlier, which itself waits on the left-turner for the same reason), a purely local, pairwise
+earlier, which itself waits on the left-turner for the same reason), because a purely local, pairwise
 right-of-way model has no global cycle detection. This is the same class of limitation as the
 pre-existing exact-simultaneous-arrival tie gridlock (mechanical yield-to-right with no tiebreaker),
 just with a different trigger. Pinned, not hidden, by
@@ -206,12 +199,12 @@ through the same arc-stepping machinery already used elsewhere and checking the 
 `reeds_shepp_length` unconditionally included the Euclidean-distance lower bound in its `min()`,
 which (since a curved path can never be shorter than the straight line between its endpoints) meant
 it almost always just returned that lower bound outright, silently discarding the "shortest of real
-candidates" its docstring claimed: fixed to only fall back to Euclidean distance when nothing else
+candidates" its docstring claimed. It now only falls back to Euclidean distance when nothing else
 is feasible.
 **A real finding from wiring it in**: CCC is NOT enabled for `HybridAStarPlanner` (`include_ccc=False`
 at all 4 of its call sites, and the Euclidean-fallback fix travels with that same flag). CCC's shorter
 paths are more curvature-aggressive than CSC's, and since Hybrid A*'s analytic expansion is attempted
-from every search node once it's near the goal, not just the one final connection, enabling CCC
+from every search node once it's near the goal (not just the one final connection), enabling CCC
 there measurably reopened entry 2's Pure Pursuit collision on 3 scenarios, including 2
 (`perpendicular_flanked`, `perpendicular_obstructed_lane`) that were previously perfectly safe.
 `HybridAStarPlanner` already degrades gracefully without CCC (composes the same 3-point-turn shape
@@ -233,7 +226,7 @@ other candidate pairs in the same window had) and a genuine recorded full stop, 
 the original. `core/validation/ngsim_loader.py`'s `DEFAULT_LEADER_ID`/`DEFAULT_FOLLOWER_ID` now
 point at it; full extraction account in `core/data/ngsim/ATTRIBUTION.md`.
 **A real finding from re-validating against it**: this leader's genuine full stop measurably (if
-temporarily) stresses the composed EKF/Stanley loop during the low-speed restart afterward,
+temporarily) stresses the composed EKF/Stanley loop during the low-speed restart afterward.
 Stanley's `atan2(k*cte, speed)` correction is deliberately weakest exactly when speed is lowest, so
 a transient lateral-tracking degradation while pulling away from a dead stop is expected behavior.
 Confirmed genuinely transient (not a failure to converge) by checking the full run, not just the
@@ -241,7 +234,7 @@ region right after it, across all 6 (controller, seed) pairs: peak cross-track e
 ~15s recovery window reached 0.62m on one otherwise-unremarkable run (seed 2/idm), but every pair
 settled back under the 0.46m real-driver-scatter bar well before the run's midpoint regardless.
 `tests/test_full_highway.py`'s convergence tests now check the settling window from t=50s rather
-than t=30s to fairly account for this (documented in the test itself, not silently widened): a
+than t=30s to fairly account for this (documented in the test itself, not silently widened). This is a
 finding, not a hidden regression: the RMS/min-gap figures reported in DESIGN.md's H5 entry shifted
 somewhat with the new (genuinely different) real leader, both noted there.
 
@@ -249,16 +242,16 @@ somewhat with the new (genuinely different) real leader, both noted there.
 
 **Where**: `core/nodes/sensor_node.py` (dropout/latency modeling itself), `core/nodes/controller_node.py`
 (`latency_margin`), `core/harness.py` (derives it).
-**Status**: the capability itself is built (DESIGN.md section 10's future-extensions list),
+**Status**: the capability itself is built (DESIGN.md section 10's future-extensions list);
 `SensorNode` can independently drop each tick's messages (`dropout_prob`, never arrives) or delay
 them (`latency_ticks`, arrives late with the value it actually had when computed, not a stale
-recompute). Both default to off, so every pre-existing caller is byte-for-byte unaffected:
-verified directly, not just assumed: the RNG draw that gates dropout is skipped entirely (not just
+recompute). Both default to off, so every pre-existing caller is byte-for-byte unaffected.
+This is verified directly, not just assumed: the RNG draw that gates dropout is skipped entirely (not just
 guaranteed to never fire) when `dropout_prob == 0.0`, so the noise-sample sequence every other test
 depends on is untouched.
 **A real bug found and fixed while validating it**: a sweep across all 5 scenarios, both
 controllers, 5 seeds each found dropout genuinely safe up to at least 0.4 (0 collisions), but
-latency caused real collisions starting at just 5 ticks (0.5s), `ControllerNode`'s reactive speed
+latency caused real collisions starting at just 5 ticks (0.5s), because `ControllerNode`'s reactive speed
 governor was trusting a delayed `obstacle_ranges` reading as if it reflected the *current* gap, when
 it could be reporting a gap from `latency_ticks` ago, before the vehicle closed more distance toward
 it. Fixed with `latency_margin`: an extra, worst-case-derived subtraction from the governor's gap
@@ -269,10 +262,10 @@ collisions at latency_ticks<=10 across the full sweep after the fix (previously 
 latency_ticks=5 alone), and a direct regression test confirms the specific fix is load-bearing (the
 same case collides with `latency_margin` forced back to 0).
 **What's still open**: latency beyond ~10-20 ticks (1-2s) can still cause real collisions, through a
-*different* mechanism the margin fix can't reach, delayed EKF corrections (compass/position_fix/
+*different* mechanism the margin fix can't reach: delayed EKF corrections (compass/position_fix/
 landmark_bearings are subject to the same `latency_ticks`) let dead-reckoning drift accumulate for
-longer between fixes, and a reactive controller (Pure Pursuit most of all, consistent with its
-already-documented curvature-saturation fragility: entry 2) can steer the *true* vehicle into an
+longer between fixes, and a reactive controller (Pure Pursuit most of all, consistent with the
+curvature-saturation fragility already documented in entry 2) can steer the *true* vehicle into an
 obstacle the *estimated* vehicle would have cleared. Confirmed directly, not just inferred: one such
 run's true/estimated position error reached 2.7-4.0m in the ticks immediately before collision.
 **What would close it**: proper out-of-sequence-measurement handling in the EKF (fuse a delayed
@@ -309,8 +302,8 @@ correctly delivers the output GIF to the host through the `./out` volume mount. 
    across seeds 1-5 on the host: smaller than the ~5mm swing the platform difference alone
    produced (-2.4mm on host vs. +2.3mm in-container for the identical seed=1 case), i.e. this
    specific config really was a coin flip, not a test-design boundary-rounding artifact.
-   `sensor_latency_ticks=10`: still inside this scenario's own already-documented verified-safe
-   upper bound (entry 7), produces a consistent ~6cm penetration without the fix and >15cm
+   `sensor_latency_ticks=10` (still inside this scenario's own already-documented verified-safe
+   upper bound, entry 7) produces a consistent ~6cm penetration without the fix and >15cm
    clearance with it, confirmed matching between host and container to within ~3mm. The test now
    uses `latency_ticks=10` and asserts on that continuous clearance metric (with headroom on both
    sides of zero) rather than the boolean `result.collision`.
@@ -323,15 +316,6 @@ correctly delivers the output GIF to the host through the `./out` volume mount. 
    both runs then measured the same deeply-negative clearance, masking the fix entirely. Caught
    immediately by the new continuous assertion (the "with-fix" run's clearance failed instead of
    trivially passing); fixed by reloading `load_scenario(...)` fresh inside each closure call.
-**What would close it further**: nothing outstanding, the underlying app behavior (the latency
+**What would close it further**: nothing is outstanding, because the underlying app behavior (the latency
 margin fix) was never actually broken; only this one test's construction was fragile, on two
 independent axes, both now fixed.
-
-## Testing coverage gaps (not bugs, but relevant context)
-
-Closed. `test_sensors.py` (hand-computed ray/circle intersection cases: dead ahead, out of range,
-behind the beam, off to the side, tangent, nearest-of-several, beam-angle composition with vehicle
-heading) and `test_control.py` (Pure Pursuit/MPC convergence from directly on a straight path and
-from a lateral offset, decoupled from any planner or the estimation stack) both now exist.
-`test_simulation.py`'s integration-level coverage remains, unchanged, as the end-to-end check on
-top of them.

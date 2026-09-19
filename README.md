@@ -50,20 +50,19 @@ python -m core.visualization.web_export                 # re-run the scenarios, 
 python -m http.server 8000 --directory docs/viewer      # then open http://localhost:8000
 ```
 
-The page loads three.js from a CDN, so it needs a network connection. Fidelity notes: KITTI supplies the
-trajectory while its sensor noise is simulated; the parking collision test is a 1.0 m circle, smaller
-than the drawn 4.5 m car; the highway harness locates the ego by nearest waypoint (2 m apart), so
-its reported gap can differ from the drawn one by up to 1 m, and the viewer shows the drawn
-geometry; cars in the neighboring lanes are simulated background traffic that never interacts with
-the ego; and scenery, signs and signals are illustrative and drawn oversized at intersections (see
-[DESIGN.md](DESIGN.md#9-known-limitations--assumptions)).
+The page loads three.js from a CDN, so it needs a network connection. The viewer is illustrative in
+several ways (the parking collision circle is smaller than the drawn car, the highway gap is quantized
+to 2 m waypoints, neighboring-lane traffic never interacts with the ego, and scenery, signs and signals
+are decorative); see [DESIGN.md](DESIGN.md#9-known-limitations--assumptions).
 
 ## Architecture
 
-<p align="center"><img src="docs/media/architecture.png" alt="Node graph: VehicleNode (ground truth, red) sends true_state only to SensorNode. EstimatorNode receives odometry and sensor readings and publishes pose_estimate to PlannerNode and ControllerNode. PlannerNode sends a path to ControllerNode, which sends control_cmd back to VehicleNode." width="520"></p>
+<p align="center"><img src="docs/media/architecture.png" alt="Node graph: VehicleNode (ground truth, red) sends true_state to SensorNode (and to the harness for scoring only). EstimatorNode receives odometry and sensor readings and publishes pose_estimate to PlannerNode and ControllerNode. PlannerNode sends a path to ControllerNode, which sends control_cmd back to VehicleNode." width="520"></p>
 
 Nodes talk only through named topics and typed messages. Ground truth (`true_state`, red)
-reaches `SensorNode` alone, so the estimator, planner, and controller structurally cannot see it.
+reaches only `SensorNode` and the harness's scoring code, so the estimator, planner, and controller
+structurally cannot see it. The diagram shows the main data flow; a stalled `ControllerNode` also
+sends `replan_request` back to `PlannerNode`.
 A new planner or controller drops in by satisfying `Planner` or `Controller` (`interfaces.py`).
 Highway mode uses the same pattern with more nodes (ACC, lane centering, intersection navigation),
 composed by a `LongitudinalArbiterNode` that takes the most conservative acceleration command.
@@ -81,20 +80,19 @@ Tick order and the full diagram: [DESIGN.md](DESIGN.md#2-system-architecture).
   constrained MPC for car following, with Stanley for lane centering. See
   [DESIGN.md](DESIGN.md#7-control) and [DESIGN.md](DESIGN.md#11-adaptive-cruise-control-h1).
 - **Real-data validation.** The EKF on a KITTI Odometry excerpt has a median RMSE of 0.91 m over
-  20 noise draws, against 3.43 m for dead reckoning (73% lower, better on 19 of 20 draws). Both ACC controllers replay a real 78 s NGSIM traffic
-  trace that includes a full stop. Stanley tracks a lane centerline built from about 10,400 real
-  vehicle positions.
+  20 noise draws, against 3.43 m for dead reckoning (73% lower, better on 19 of 20 draws). Both ACC
+  controllers replay a real 78 s NGSIM traffic trace that includes a full stop. Stanley tracks a lane
+  centerline built from about 10,400 real vehicle positions.
 - **Stochastic evaluation.** Success is a rate over 5 seeds, and safety is asserted on every
   scenario, controller, and seed against ground truth, never the filter's own estimate.
 - **Bugs found by validation, and documented.** IDM's textbook formula demanded -1309 m/s² in a
   standalone check, an MPC gap constraint went infeasible at a real traffic standstill, and a
   Pure Pursuit collision traced to a brake trigger that fired at the collision boundary. See
-  [KNOWN_BUGS.md](KNOWN_BUGS.md).
+  [KNOWN_BUGS.md](KNOWN_BUGS.md) and [DESIGN.md](DESIGN.md#11-adaptive-cruise-control-h1) (IDM).
 - **An RL baseline.** A PPO policy trained in a Gymnasium environment parks without collisions
   across 5 seeds on the open and flanked lots, and is compared with the planner and controller
   stack on success, collisions, and steps ([provenance](core/data/rl/PROVENANCE.md)).
-- **Tested and modular.** 312 tests (299 run on a base install; 13 more in 4 modules need the `rl` or `viz` extras),
-  ruff-clean, with planners, controllers, and nodes swappable behind common interfaces.
+- **Tested and modular.** Ruff-clean, with planners, controllers, and nodes swappable behind common interfaces.
 
 Reasoning and tradeoffs: [DESIGN.md](DESIGN.md). Module breakdown, milestones, and testing:
 [IMPLEMENTATION.md](IMPLEMENTATION.md).
@@ -112,7 +110,7 @@ Validation against real data, generated by the commands in [Quickstart](#quickst
 | EKF vs. real KITTI Odometry | ACC vs. real NGSIM traffic | Stanley vs. a real NGSIM lane |
 |---|---|---|
 | ![KITTI EKF validation](docs/media/kitti_ekf_validation.png) | ![ACC validation against real NGSIM data](docs/media/acc_validation.png) | ![Lane centering validation against a real NGSIM lane](docs/media/lane_centering_validation.png) |
-| Seed 0 shown: 0.845 m vs. 4.966 m dead reckoning | MPC-ACC on a 78 s congested US-101 trace | Cross-track error inside real drivers' 0.46 m lateral scatter |
+| Seed 0 shown: 0.845 m vs. 4.966 m dead reckoning | MPC-ACC on a 78 s congested US-101 trace | Settled cross-track error stays under real drivers' 0.46 m lateral scatter |
 
 KITTI provides the trajectory only, so the odometry, compass, and position-fix noise in that
 validation is simulated on top of it.
