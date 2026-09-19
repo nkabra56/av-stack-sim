@@ -29,7 +29,7 @@ def test_mpc_accel_stays_within_bounds():
 
 def test_mpc_a_min_defaults_to_idms_physical_emergency_floor():
     """Code-review finding: MpcAccController used to default a_min=-3.0 while IDMController
-    defaults a_min=-9.0: an untested asymmetry letting MPC-ACC brake less hard under identical events."""
+    defaults a_min=-9.0, an untested asymmetry that let MPC-ACC brake less hard under identical events."""
     assert MpcAccController().a_min == IDMController().a_min == -9.0
 
 

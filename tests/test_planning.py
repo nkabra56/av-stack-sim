@@ -131,7 +131,7 @@ def test_reeds_shepp_length_matches_the_actual_generated_path_length():
 
 def test_ccc_produces_meaningfully_shorter_paths_in_the_close_pose_regime():
     """Quantifies the actual value CCC adds (KNOWN_BUGS.md entry 5: a path-quality fix,
-    not a crash fix), if this drops near zero, the added complexity isn't worth it."""
+    not a crash fix); if this drops near zero, the added complexity isn't worth it."""
     rng = np.random.default_rng(17)
     shorter_count = 0
     trials = 300
@@ -158,7 +158,7 @@ def test_ccc_produces_meaningfully_shorter_paths_in_the_close_pose_regime():
 
 def test_hybrid_astar_does_not_use_ccc():
     """KNOWN_BUGS.md entry 5: CCC is deliberately NOT available to HybridAStarPlanner (more
-    curvature-aggressive, reopened KNOWN_BUGS.md entry 2): pins the source-level guard."""
+    curvature-aggressive, reopened KNOWN_BUGS.md entry 2). This test pins the source-level guard."""
     import inspect
 
     source = inspect.getsource(HybridAStarPlanner)

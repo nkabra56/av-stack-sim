@@ -83,8 +83,8 @@ class ParkingEnv(gym.Env):
         success = dist < GOAL_TOL and not collided  # position-only, matching
         # ParkingHarness.run()'s own success criterion (no heading term).
 
-        # Shaped reward: dense progress term (dominant every step) plus sparse terminal
-        # bonuses/penalties: dense alone would let the policy loiter without committing.
+        # Shaped reward: a dense progress term (dominant every step) plus sparse terminal
+        # bonuses/penalties, since dense alone would let the policy loiter without committing.
         reward = (self._prev_dist - dist) - 0.01
         if collided:
             reward -= 50.0

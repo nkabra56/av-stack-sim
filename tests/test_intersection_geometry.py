@@ -182,7 +182,7 @@ def test_right_turn_does_not_defer_to_oncoming_traffic_via_the_left_turn_rule():
 
 def test_mixed_turn_random_sweep_never_collides():
     """Broad regression: random start distances and turns across all four approaches must
-    never produce a real collision: this is what actually caught the two bugs above."""
+    never produce a real collision. This is what actually caught the two bugs above."""
     rng = np.random.default_rng(0)
     for _ in range(60):
         turns = rng.choice(["straight", "left", "right"], size=4)
@@ -199,7 +199,7 @@ def test_mixed_turn_random_sweep_never_collides():
 
 def test_left_turn_yield_can_gridlock_but_never_collides():
     """Known, accepted liveness limitation (KNOWN_BUGS.md entry 4): the unconditional
-    left-yields-to-oncoming rule can form a 3-vehicle wait cycle: never unsafe, just not always live."""
+    left-yields-to-oncoming rule can form a 3-vehicle wait cycle, which is never unsafe, just not always live."""
     specs = [
         VehicleSpec(NORTH, start_distance=128.7, turn="straight"),
         VehicleSpec(EAST, start_distance=115.8, turn="right"),
@@ -225,7 +225,7 @@ def test_guard_rejects_turn_lead_too_large_for_start_distance():
 
 def test_clear_distance_for_a_turning_vehicle_is_past_the_conflict_box_not_just_the_curve():
     """Code-review finding: _clear_distance's turning branch checked only the curve's endpoint,
-    not conflict_half_width: a turning vehicle could be marked "cleared" while still inside the box."""
+    not conflict_half_width, so a turning vehicle could be marked "cleared" while still inside the box."""
     from core.intersection2d_harness import _build_route, _clear_distance, _pose_at
 
     conflict_half_width, clear_margin = 9.5, 3.0

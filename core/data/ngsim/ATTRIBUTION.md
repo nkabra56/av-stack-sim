@@ -6,8 +6,8 @@ exactly one real leader/follower vehicle pair (`vehicle_id` 2896 leading, 2903 f
 via NGSIM's own `preceding` field for 783/783 frames in the follower's window: a 100% pure link,
 not just a majority one) with a verified-contiguous 100ms sample interval and a genuine recorded
 full stop (both vehicles' `v_vel` reaches exactly 0). Used to validate `core/control/acc.py`'s
-controllers against real car-following behavior, see DESIGN.md's ACC section and
-`core/validation/acc_validation.py`, and, since this pair is lane 2 (see `lane_centerline.csv`
+controllers against real car-following behavior (see DESIGN.md's ACC section and
+`core/validation/acc_validation.py`) and, since this pair is lane 2 (see `lane_centerline.csv`
 below, also lane 2), to drive the real leader in the full closed-loop ACC+Stanley composition
 (`core/full_highway_harness.py`) without a cross-lane mismatch. Re-extracted from vehicle_id 9/12
 (NGSIM lane 1) specifically to close that mismatch: see KNOWN_BUGS.md's former entry 6 and
@@ -22,7 +22,7 @@ Columns are unmodified NGSIM fields (`vehicle_id`, `global_time`, `local_x`, `lo
 happens in `core/validation/ngsim_loader.py`, not in this file, so the committed data stays
 verbatim from the source.
 
-Source: U.S. Department of Transportation, Federal Highway Administration: Next Generation
+Source: U.S. Department of Transportation, Federal Highway Administration, Next Generation
 Simulation (NGSIM) Vehicle Trajectories and Supporting Data. Downloaded via the public Socrata
 API at `data.transportation.gov` (dataset `8ect-6jqj`), no registration required.
 
@@ -34,7 +34,7 @@ remove residual per-bin noise while preserving genuine curvature. Used to valida
 `core/control/lane_centering.py`'s Stanley controller against a real lane geometry rather
 than a hand-authored curve: see DESIGN.md section 12's H3 entry and
 `core/validation/lane_centering_validation.py`. Lateral drift across the segment in the
-committed file: 1.56m, genuine gentle curvature, not synthetic.
+committed file is 1.56m, from genuine gentle curvature rather than anything synthetic.
 
 Licensed under Creative Commons Attribution-ShareAlike 3.0 (CC BY-SA 3.0). This excerpt (and the
 lane centerline derived from the same source dataset) is redistributed here for

@@ -13,7 +13,7 @@ def test_lane_centerline_data_is_present():
 @pytest.mark.parametrize("initial_offset", [1.5, -1.5, 3.0])
 def test_converges_and_stays_within_real_driver_scatter(initial_offset):
     """The plausibility bar: after settling, tracking error should stay within real
-    drivers' own lateral scatter, not a strict target, a sanity check."""
+    drivers' own lateral scatter. Not a strict target, just a sanity check."""
     result = validate(initial_offset=initial_offset)
     assert result.max_cte_after_settling < REAL_LATERAL_STD_M
 

@@ -12,8 +12,8 @@ REAR_ANGLE = np.pi  # dead behind
 
 
 class _FixedController:
-    """Stub Controller: always returns the same (v, delta), regardless of path:
-    isolates the governor's clamping from any real path-tracking law."""
+    """Stub Controller: always returns the same (v, delta) regardless of path,
+    which isolates the governor's clamping from any real path-tracking law."""
 
     def __init__(self, v: float):
         self._v = v
@@ -92,8 +92,8 @@ def _node_with_pose_and_path(bus: Bus, path_y: float, pose_y: float, **kwargs) -
 
 
 def test_effective_buffer_defaults_to_stopping_buffer_when_tracking_disabled():
-    """tracked_stopping_buffer=None (the default) must disable the feature entirely:
-    what keeps every planner without an exposed safety_margin on the conservative buffer."""
+    """tracked_stopping_buffer=None (the default) must disable the feature entirely;
+    that is what keeps every planner without an exposed safety_margin on the conservative buffer."""
     bus = Bus()
     node = _node_with_pose_and_path(bus, path_y=0.0, pose_y=0.0, stopping_buffer=0.5)
     assert node._effective_buffer() == 0.5

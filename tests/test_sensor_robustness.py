@@ -1,4 +1,4 @@
-"""End-to-end robustness of the closed loop under sensor dropout/latency: SensorNode's
+"""End-to-end robustness of the closed loop under sensor dropout/latency; SensorNode's
 own params are unit-tested in test_sensor_node.py. Thresholds below come from a real sweep (KNOWN_BUGS.md)."""
 
 import numpy as np

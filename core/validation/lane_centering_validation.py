@@ -47,8 +47,8 @@ def validate(
         delta = controller.control(vehicle, path, speed)
         vehicle.update(speed, delta, dt)
 
-        # Measured at the front axle, matching StanleyController.control()'s own
-        # cross-track error, reporting rear-axle CTE would validate a different quantity.
+        # Measured at the front axle to match StanleyController.control()'s own
+        # cross-track error; reporting rear-axle CTE would validate a different quantity.
         front_x = vehicle.x + wheelbase * np.cos(vehicle.theta)
         front_y = vehicle.y + wheelbase * np.sin(vehicle.theta)
         nearest = int(np.argmin(np.hypot(path[:, 0] - front_x, path[:, 1] - front_y)))

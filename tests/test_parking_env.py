@@ -26,7 +26,7 @@ def test_reset_returns_an_observation_in_bounds():
 def test_driving_straight_toward_the_goal_gives_positive_reward():
     env = ParkingEnv(scenario_name="perpendicular_open")
     env.reset(seed=0)
-    # perpendicular_open's vehicle starts facing roughly toward the spot, driving
+    # perpendicular_open's vehicle starts facing roughly toward the spot, so driving
     # forward should reduce distance-to-goal, which the dense reward term rewards.
     _, reward, _, _, info = env.step(np.array([1.0, 0.0], dtype=np.float32))
     assert reward > 0

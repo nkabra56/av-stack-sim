@@ -64,8 +64,8 @@ def test_cross_track_error_converges_within_real_driver_scatter(controller_name,
 
 @pytest.mark.parametrize("controller_name", list(CONTROLLERS))
 def test_gap_is_plausible_relative_to_the_real_follower(controller_name):
-    """Same 0.2x-3.0x band as test_acc_validation.py's plausibility check, not a
-    strict match, a sanity check against wildly divergent following behavior."""
+    """Same 0.2x-3.0x band as test_acc_validation.py's plausibility check: not a
+    strict match, just a sanity check against wildly divergent following behavior."""
     result, pair = _run(controller_name, seed=0)
     mean_gap = float(np.mean(result.gap))
     mean_real_gap = float(np.mean(pair.real_space_headway))
@@ -112,7 +112,7 @@ def test_speed_estimator_uses_real_steering_not_hardcoded_zero():
 
 
 # --- H5 Phase B: routing IntersectionNavigator through the composed loop. Uses a synthetic
-# lead vehicle, not real NGSIM, forcing a freeway excerpt onto a stop-sign scene would be incoherent.
+# lead vehicle, not real NGSIM, since forcing a freeway excerpt onto a stop-sign scene would be incoherent.
 
 STOP_LINE_POSITION = 400.0
 V_CRUISE = 15.0
@@ -144,7 +144,7 @@ def _run_with_intersection(other_script, lead_v0: float = 20.0, acc_v0: float = 
 @pytest.mark.parametrize("acc_v0", [20.0, 30.0])
 def test_never_crosses_stop_line_without_stopping_with_non_blocking_lead_present(acc_v0):
     """The composition edge case DESIGN.md section 12's H5 Phase B flags: ACC free to
-    cruise since the lead never constrains it: catches IntersectionNavigator not winning in time."""
+    cruise since the lead never constrains it. Catches IntersectionNavigator not winning in time."""
     result = _run_with_intersection(no_other_vehicle, lead_v0=30.0, acc_v0=acc_v0)
     assert not result.ran_stop_sign
     assert result.ego_stop_time is not None

@@ -32,13 +32,13 @@ scenario and the one with real obstacles to route around, and reach it in notice
 fewer steps than the baseline in both cases, likely because they aren't bound by Hybrid
 A*'s own path-following behavior or Pure Pursuit/MPC's tracking-error margins, free
 instead to cut directly toward the goal. Both scenarios converged to a near-identical
-`ep_rew_mean`/`ep_len_mean` during training (~109 / 65): plausible, not a training bug:
+`ep_rew_mean`/`ep_len_mean` during training (~109 / 65). That is plausible, not a training bug:
 `perpendicular_flanked`'s obstacles sit off the direct start-to-goal line (y=2.5, while
 the direct path stays near y=0-1), so a policy free to choose its own path never
 actually needs a meaningfully different, longer route around them.
 
 **Not evidence the learned policy is "better"** in any general sense: it never has to
-handle sensor noise (trains and evaluates on ground truth, see `rl_comparison.py`'s
+handle sensor noise (it trains and evaluates on ground truth; see `rl_comparison.py`'s
 own docstring for why this comparison isn't strictly apples-to-apples), and it's
 untested on the project's genuinely tight scenarios (`parallel_between_cars`,
 `perpendicular_obstructed_lane`) where a reverse-gear cusp or a materially longer

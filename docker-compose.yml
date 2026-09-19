@@ -11,7 +11,7 @@ services:
     build:
       context: .
       target: base
-    # Output (e.g. --save/--plot files) lands in ./out on the host, nothing
+    # Output (e.g. --save/--plot files) lands in ./out on the host; nothing
     # written elsewhere in the container persists past the run.
     volumes:
       - ./out:/app/out

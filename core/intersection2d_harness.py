@@ -114,7 +114,7 @@ def run_multi_approach_scenario(
     v_cruise: float = 15.0,
     dt: float = 0.1,
     max_steps: int = 3000,
-    navigators: list[IntersectionNavigator] | None = None,  # override, one per spec, lets tests
+    navigators: list[IntersectionNavigator] | None = None,  # override, one per spec, so tests can
     # substitute a non-compliant navigator to verify the collision check is a real safety net.
 ) -> MultiIntersectionResult:
     # conflict_half_width/stop_margin interact with VehicleSpec.lane_offset and
@@ -127,7 +127,7 @@ def run_multi_approach_scenario(
             raise ValueError(
                 f"{spec.approach.name} turn={spec.turn}: turn_lead ({turn_lead:.1f}m, from "
                 f"turning_radius={spec.turning_radius}) exceeds conflict_half_width+stop_margin "
-                f"({conflict_half_width + stop_margin:.1f}m), a stopped vehicle would already be "
+                f"({conflict_half_width + stop_margin:.1f}m), so a stopped vehicle would already be "
                 "mid-curve. Increase conflict_half_width/stop_margin or decrease turning_radius."
             )
         # Also guard against pre_curve_length going negative via too-small start_distance:
@@ -135,8 +135,8 @@ def run_multi_approach_scenario(
         if turn_lead >= spec.start_distance - 1.0:
             raise ValueError(
                 f"{spec.approach.name} turn={spec.turn}: turn_lead ({turn_lead:.1f}m) leaves less "
-                f"than 1m of straight entry lane before start_distance ({spec.start_distance:.1f}m) "
-                "-- the vehicle would start already mid-curve. Increase start_distance or decrease "
+                f"than 1m of straight entry lane before start_distance ({spec.start_distance:.1f}m), "
+                "so the vehicle would start already mid-curve. Increase start_distance or decrease "
                 "turning_radius."
             )
     n = len(specs)

@@ -94,7 +94,7 @@ def test_a_planner_that_cannot_find_a_route_leaves_the_old_path_in_place():
 
 def test_controller_node_actually_asks_for_a_replan_when_the_initial_plan_failed():
     """Found in code review: PlannerNode marks `_planned = True` even if planning failed,
-    and ControllerNode used to early-return before reaching the stall counter: disconnected (KNOWN_BUGS.md entry 3)."""
+    and ControllerNode used to early-return before reaching the stall counter, leaving it disconnected (KNOWN_BUGS.md entry 3)."""
     from core.control.mpc import MPCController
     from core.nodes.controller_node import STALL_TICKS, ControllerNode
 
@@ -129,7 +129,7 @@ def test_controller_node_actually_asks_for_a_replan_when_the_initial_plan_failed
 
 
 class _AlwaysWantsToMove:
-    """Stub Controller: always wants to drive forward, regardless of the path, isolates
+    """Stub Controller: always wants to drive forward, regardless of the path, which isolates
     ControllerNode's stall-detection from any real path-tracking law."""
 
     def control(self, pose: HasPose, path: np.ndarray) -> tuple[float, float]:
