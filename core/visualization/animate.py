@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import transforms
 from matplotlib.animation import FuncAnimation, PillowWriter
-from matplotlib.patches import Circle, Ellipse, Rectangle
+from matplotlib.patches import Circle, Ellipse, Polygon, Rectangle
 
 from core.environment import Environment
 from core.harness import SimulationResult
@@ -14,9 +14,16 @@ VEHICLE_LENGTH = 4.5  # matches the ~2.7m wheelbase + overhangs used everywhere 
 VEHICLE_WIDTH = 1.8  # scenario spot dimensions), not an arbitrary small rendering size
 
 
+def _spot_corners(spot) -> list[tuple[float, float]]:
+    ct, st = np.cos(spot.theta), np.sin(spot.theta)
+    hl, hw = spot.length / 2, spot.width / 2
+    return [(spot.x + u * ct - v * st, spot.y + u * st + v * ct) for u, v in [(-hl, -hw), (hl, -hw), (hl, hw), (-hl, hw)]]
+
+
 def _axis_bounds(result: SimulationResult, environment: Environment, pad: float = 1.0):
-    xs = [environment.spot.x]
-    ys = [environment.spot.y]
+    corners = _spot_corners(environment.spot)
+    xs = [c[0] for c in corners]
+    ys = [c[1] for c in corners]
     if len(result.true_history):
         xs += list(result.true_history[:, 0])
         ys += list(result.true_history[:, 1])
@@ -62,13 +69,7 @@ def render_animation(
         )
 
     spot = environment.spot
-    gs = spot.size
-    ax.add_patch(
-        Rectangle(
-            (spot.x - gs / 2, spot.y - gs / 2), gs, gs,
-            facecolor="green", alpha=0.3, edgecolor="darkgreen", linewidth=2,
-        )
-    )
+    ax.add_patch(Polygon(_spot_corners(spot), closed=True, facecolor="green", alpha=0.3, edgecolor="darkgreen", linewidth=2))
 
     if result.path is not None and len(result.path):
         ax.plot(result.path[:, 0], result.path[:, 1], "--", lw=1.5, color="gray", alpha=0.6, label="planned")

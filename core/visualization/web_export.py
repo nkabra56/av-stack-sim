@@ -117,7 +117,7 @@ def _parking_scene(scenario_name: str, controller_name: str, title: str, blurb: 
         "n": n,
         "outcome": outcome,
         "bounds": [xmin, xmax, ymin, ymax],
-        "spot": {"x": env.spot.x, "y": env.spot.y, "th": env.spot.theta, "size": env.spot.size},
+        "spot": {"x": env.spot.x, "y": env.spot.y, "th": env.spot.theta, "w": env.spot.width, "l": env.spot.length},
         "obstacles": [{"x": o.x, "y": o.y, "r": o.radius} for o in env.obstacles],
         "collision_radius": VEHICLE_RADIUS,
         "path": _arr(path[:: max(1, len(path) // 300)], 2),

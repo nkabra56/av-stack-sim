@@ -20,12 +20,13 @@ class Obstacle:
 
 @dataclass(frozen=True)
 class Spot:
-    """Target parking spot center, plus its heading for perpendicular vs. parallel spots."""
+    """Target parking stall: center, heading, and a `length` x `width` rectangle (length along the heading)."""
 
     x: float
     y: float
     theta: float = 0.0
-    size: float = 1.0
+    width: float = 2.75
+    length: float = 5.5
 
 
 @dataclass

@@ -72,3 +72,18 @@ def test_all_scenario_headings_are_radians(scenario_name):
     scenario = load_scenario(scenario_name)
     assert -np.pi <= scenario.vehicle.theta <= np.pi
     assert -np.pi <= scenario.environment.spot.theta <= np.pi
+
+
+@pytest.mark.parametrize("scenario_name", list_scenarios())
+def test_stall_is_a_rectangle_that_fits_the_car_and_clears_neighbors(scenario_name):
+    """A stall is longer than it is wide, holds a 4.5 x 1.8 m car, and no obstacle overlaps it."""
+    env = load_scenario(scenario_name).environment
+    spot = env.spot
+    assert spot.length > spot.width
+    assert spot.length >= 4.5 and spot.width >= 1.8
+    c, s = np.cos(spot.theta), np.sin(spot.theta)
+    for o in env.obstacles:
+        dx, dy = o.x - spot.x, o.y - spot.y
+        u, v = dx * c + dy * s, -dx * s + dy * c  # obstacle center in the stall frame (u along heading)
+        gap = np.hypot(max(abs(u) - spot.length / 2, 0.0), max(abs(v) - spot.width / 2, 0.0))
+        assert gap > o.radius

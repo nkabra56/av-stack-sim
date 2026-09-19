@@ -578,11 +578,11 @@ async function main() {
     }
 
     if (s.spot) {
-      const sp = s.spot, h = sp.size / 2, c = Math.cos(sp.th), sn = Math.sin(sp.th);
+      const sp = s.spot, hl = sp.l / 2, hw = sp.w / 2, c = Math.cos(sp.th), sn = Math.sin(sp.th);
       const corner = (u, v) => [sp.x + u * c - v * sn, sp.y + u * sn + v * c];
-      const k = [corner(-h, -h), corner(h, -h), corner(h, h), corner(-h, h)];
+      const k = [corner(-hl, -hw), corner(hl, -hw), corner(hl, hw), corner(-hl, hw)];
       for (let i = 0; i < 4; i++) root.add(bar(...k[i], ...k[(i + 1) % 4], 0.14, 0x34d399, 0.95, 0.03));
-      const fill = new THREE.Mesh(new THREE.PlaneGeometry(sp.size, sp.size),
+      const fill = new THREE.Mesh(new THREE.PlaneGeometry(sp.l, sp.w),
         new THREE.MeshBasicMaterial({ color: 0x34d399, transparent: true, opacity: 0.14, depthWrite: false, ...decal }));
       fill.position.set(sp.x, sp.y, 0.02); fill.rotation.z = sp.th;
       const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.7, 3),

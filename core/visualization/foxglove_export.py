@@ -122,10 +122,9 @@ def _ground_entity(xlim: tuple[float, float], ylim: tuple[float, float]) -> Scen
 
 def _lot_entity(environment: Environment, start_xy: tuple[float, float]) -> SceneEntity:
     spot = environment.spot
-    half = spot.size / 2
     outline = LinePrimitive(
         type=LinePrimitiveLineType.LineStrip,
-        points=_rotated_rect_ring(spot.x, spot.y, half, half, spot.theta, z=0.01),
+        points=_rotated_rect_ring(spot.x, spot.y, spot.length / 2, spot.width / 2, spot.theta, z=0.01),
         color=Color(r=0.2, g=0.75, b=0.35, a=1.0),
         thickness=0.08,
     )

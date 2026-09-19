@@ -343,8 +343,8 @@ it's tracking a real `Vehicle` or a `PoseEstimateMsg`, only that whatever it's g
   parallel-parking maneuver) and inspecting individual frames: the speed panel shows the governor's
   real oscillation during a tight reverse-forward sequence, and the sensor panel visibly shortens a
   beam exactly when the vehicle is close to an obstacle in that beam's direction, not just at rest.
-- **M6 (Tests): done.** 312 tests across both modes run in ~380s. The 13 tests in 4 modules that need the optional `rl`/`viz`
-  extras skip via `pytest.importorskip`, so 299 run on a base install.
+- **M6 (Tests): done.** 317 tests across both modes run in ~380s. The 13 tests in 4 modules that need the optional `rl`/`viz`
+  extras skip via `pytest.importorskip`, so 304 run on a base install.
 
 ## 4. Testing strategy
 

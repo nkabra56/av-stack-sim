@@ -1,7 +1,7 @@
 # AV Stack Sim
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-299%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-304%20passing-brightgreen)](tests/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
 A from-scratch autonomous-driving stack in Python: state estimation, motion planning, and control
@@ -119,7 +119,7 @@ validation is simulated on top of it.
 
 ```bash
 pip install -e ".[dev]"
-pytest                                                          # 299 pass; 13 more tests need `rl`/`viz`
+pytest                                                          # 304 pass; 13 more tests need `rl`/`viz`
 ruff check core tests                                           # lint
 
 # Parking
