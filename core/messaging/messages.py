@@ -90,6 +90,7 @@ class ControlCmdMsg:
 class LeadVehicleStateMsg:
     position: float  # meters, along-road, ground truth
     speed: float  # m/s
+    lane_offset: float = 0.0  # meters, perpendicular to the road; 0.0 = ego's lane
 
 
 @dataclass(frozen=True)

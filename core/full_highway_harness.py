@@ -25,10 +25,24 @@ from core.nodes.intersection_controller_node import IntersectionControllerNode
 from core.nodes.lane_centering_node import LaneCenteringControllerNode
 from core.nodes.lead_vehicle_node import LeadVehicleNode
 from core.nodes.longitudinal_arbiter_node import LongitudinalArbiterNode
+from core.nodes.merging_vehicle_node import MergingVehicleNode
 from core.nodes.other_vehicle_script_node import OtherVehicleScript, OtherVehicleScriptNode
-from core.nodes.radar_node import RadarNode
+from core.nodes.radar_node import IN_LANE_TOLERANCE, RadarNode
 from core.nodes.speed_estimator_node import SpeedEstimatorNode
 from core.vehicle import Vehicle
+
+
+@dataclass(frozen=True)
+class MergingVehicleSpec:
+    """Initial state and gap-acceptance trigger for an optional reactive merging vehicle
+    in the lane beside the ego. See core/nodes/merging_vehicle_node.py."""
+
+    initial_gap_ahead_of_ego: float  # meters; its starting front-bumper position minus the ego's
+    speed: float  # m/s, its own free-flow speed
+    length: float = 4.5  # meters, for radar bumper-to-bumper range
+    gap_threshold: float = 20.0  # meters; gap ahead of the ego it waits for before merging
+    initial_lane_offset: float = 3.7  # meters, real US lane width
+    merge_duration: float = 3.0  # seconds to complete the lane change once accepted
 
 
 @dataclass
@@ -47,7 +61,14 @@ class FullHighwaySimulationResult:
     lead_speed: np.ndarray
     gap: np.ndarray  # true bumper-to-bumper, meters (arc-length based)
     min_gap: float
-    collided: bool  # true gap ever reached zero
+    collided: bool  # true gap ever reached zero, against the recorded lead OR the merging vehicle
+    # Set only when merging_vehicle is given, None/empty otherwise:
+    merging_position: np.ndarray | None = None
+    merging_speed: np.ndarray | None = None
+    merging_lane_offset: np.ndarray | None = None
+    merging_gap: np.ndarray | None = None  # true bumper-to-bumper to the merging vehicle
+    min_merging_gap: float | None = None
+    collided_with_merging: bool | None = None
     # Set only in Phase B (intersection_navigator given), None otherwise:
     states: list[IntersectionState] | None = None
     ego_stop_time: float | None = None
@@ -82,6 +103,7 @@ class FullHighwayHarness:
         position_fix_period: int = 10,
         intersection_navigator: IntersectionNavigator | None = None,
         other_vehicle_script: OtherVehicleScript | None = None,
+        merging_vehicle: MergingVehicleSpec | None = None,
     ):
         self.dt = dt
         self.has_intersection = intersection_navigator is not None
@@ -107,7 +129,22 @@ class FullHighwayHarness:
             speedometer_std=speedometer_std, steering_odom_std=steering_odom_std,
             compass_std=compass_std, position_std=position_std, position_fix_period=position_fix_period,
         )
-        self.radar_node = RadarNode(self.bus, rng, lead_length, range_std=range_std, range_rate_std=range_rate_std)
+        self.merging_vehicle_node = None
+        self.merging_vehicle_length = None
+        if merging_vehicle is not None:
+            merging_start_position = ego_start_s + merging_vehicle.initial_gap_ahead_of_ego
+            self.merging_vehicle_node = MergingVehicleNode(
+                self.bus, merging_start_position, merging_vehicle.speed, dt,
+                gap_threshold=merging_vehicle.gap_threshold,
+                initial_lane_offset=merging_vehicle.initial_lane_offset,
+                merge_duration=merging_vehicle.merge_duration,
+            )
+            self.merging_vehicle_length = merging_vehicle.length
+
+        self.radar_node = RadarNode(
+            self.bus, rng, lead_length, range_std=range_std, range_rate_std=range_rate_std,
+            merging_length=self.merging_vehicle_length,
+        )
 
         ekf = ExtendedKalmanFilter(
             x0=np.array([vehicle.x, vehicle.y, vehicle.theta, lead_speed[0]]),
@@ -149,10 +186,12 @@ class FullHighwayHarness:
         self._latest_ego_state: EgoLongitudinalStateMsg | None = None
         self._latest_ego_highway: EgoHighwayStateMsg | None = None
         self._latest_lead: LeadVehicleStateMsg | None = None
+        self._latest_merging: LeadVehicleStateMsg | None = None
         self._latest_estimate: EgoSpeedEstimateMsg | None = None
         self.bus.subscribe("ego_state", self._on_ego_state)
         self.bus.subscribe("ego_highway_state", self._on_ego_highway_state)
         self.bus.subscribe("lead_state", self._on_lead_state)
+        self.bus.subscribe("merging_vehicle_state", self._on_merging_state)
         self.bus.subscribe("ego_speed_estimate", self._on_estimate)
 
     def _on_ego_state(self, msg: EgoLongitudinalStateMsg) -> None:
@@ -163,6 +202,9 @@ class FullHighwayHarness:
 
     def _on_lead_state(self, msg: LeadVehicleStateMsg) -> None:
         self._latest_lead = msg
+
+    def _on_merging_state(self, msg: LeadVehicleStateMsg) -> None:
+        self._latest_merging = msg
 
     def _on_estimate(self, msg: EgoSpeedEstimateMsg) -> None:
         self._latest_estimate = msg
@@ -178,8 +220,11 @@ class FullHighwayHarness:
 
         times, ego_x, ego_y, ego_theta, ego_arc, ego_speed, ego_speed_est = [], [], [], [], [], [], []
         ego_accel, ego_delta, ctes, lead_pos, lead_speed_hist, gaps = [], [], [], [], [], []
+        merging_pos, merging_spd, merging_offset, merging_gaps = [], [], [], []
         min_gap = float("inf")
-        collided = False
+        min_merging_gap = float("inf")
+        collided_with_lead = False
+        collided_with_merging = False
         states = [] if self.has_intersection else None
         ran_stop_sign = False if self.has_intersection else None
         proceed_time = None
@@ -191,6 +236,8 @@ class FullHighwayHarness:
             if self.other_vehicle_node is not None:
                 self.other_vehicle_node.step()
             self.ego_node.step()
+            if self.merging_vehicle_node is not None:
+                self.merging_vehicle_node.step()
             self.radar_node.step()
             self.lane_centering_node.step()
             self.acc_node.step()
@@ -202,7 +249,7 @@ class FullHighwayHarness:
             gap = (self._latest_lead.position - self.lead_length) - ts.position
             min_gap = min(min_gap, gap)
             if gap <= 0:
-                collided = True
+                collided_with_lead = True
 
             times.append(tick * self.dt)
             ego_x.append(th.x)
@@ -218,6 +265,20 @@ class FullHighwayHarness:
             lead_speed_hist.append(self._latest_lead.speed)
             gaps.append(gap)
 
+            if self.merging_vehicle_node is not None:
+                mv = self._latest_merging
+                merging_pos.append(mv.position)
+                merging_spd.append(mv.speed)
+                merging_offset.append(mv.lane_offset)
+                merging_gap = (mv.position - self.merging_vehicle_length) - ts.position
+                merging_gaps.append(merging_gap)
+                # Only in-lane overlap is a real collision (same convention RadarNode uses for
+                # visibility): side-by-side with lane_offset != 0 is a safe pass, not a crash.
+                if abs(mv.lane_offset) < IN_LANE_TOLERANCE:
+                    min_merging_gap = min(min_merging_gap, merging_gap)
+                    if merging_gap <= 0:
+                        collided_with_merging = True
+
             if self.has_intersection:
                 navigator = self.intersection_node.navigator
                 states.append(navigator.state)
@@ -228,7 +289,7 @@ class FullHighwayHarness:
                 if proceed_time is None and navigator.state == IntersectionState.PROCEEDING:
                     proceed_time = tick * self.dt
 
-            if collided or ts.position >= self.arc_length_table[-1]:
+            if collided_with_lead or collided_with_merging or ts.position >= self.arc_length_table[-1]:
                 break
 
         ego_stop_time = self.intersection_node.navigator.stop_time if self.has_intersection else None
@@ -248,7 +309,13 @@ class FullHighwayHarness:
             lead_speed=np.array(lead_speed_hist),
             gap=np.array(gaps),
             min_gap=min_gap,
-            collided=collided,
+            collided=collided_with_lead or collided_with_merging,
+            merging_position=np.array(merging_pos) if self.merging_vehicle_node is not None else None,
+            merging_speed=np.array(merging_spd) if self.merging_vehicle_node is not None else None,
+            merging_lane_offset=np.array(merging_offset) if self.merging_vehicle_node is not None else None,
+            merging_gap=np.array(merging_gaps) if self.merging_vehicle_node is not None else None,
+            min_merging_gap=min_merging_gap if self.merging_vehicle_node is not None else None,
+            collided_with_merging=collided_with_merging if self.merging_vehicle_node is not None else None,
             states=states,
             ego_stop_time=ego_stop_time,
             ran_stop_sign=ran_stop_sign,
