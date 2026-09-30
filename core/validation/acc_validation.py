@@ -80,12 +80,63 @@ def plot_validation(result: AccValidationResult, save_path: str) -> None:
     plt.close(fig)
 
 
+def compare_uncertainty_gain(uncertainty_gain: float, seed: int = 0) -> dict:
+    """Replays this trace's real leader speed with MpcAccController at uncertainty_gain=0.0
+    vs. a chosen nonzero gain, and measures the realized min gap in two windows: the trace's
+    genuine deceleration/full-stop event (leader speed reaches 0 around t=21-30.5s, ramping
+    down from about t=10s) and a later, smooth-flow stretch (t>=55s, leader cruising 12-18 m/s).
+    """
+    pair = load_following_pair()
+
+    def run(gain: float) -> AccSimulationResult:
+        harness = AccHarness(
+            lead_position=pair.leader.position,
+            lead_speed=pair.leader.speed,
+            lead_length=pair.leader.length,
+            controller=MpcAccController(uncertainty_gain=gain),
+            ego_initial_speed=pair.follower.speed[0],
+            ego_initial_gap=pair.real_space_headway[0],
+            seed=seed,
+        )
+        return harness.run()
+
+    baseline = run(0.0)
+    boosted = run(uncertainty_gain)
+
+    decel_mask = (baseline.times >= 10.0) & (baseline.times <= 35.0)
+    smooth_mask = baseline.times >= 55.0
+
+    return {
+        "baseline_min_gap_decel": float(np.min(baseline.gap[decel_mask])),
+        "boosted_min_gap_decel": float(np.min(boosted.gap[decel_mask])),
+        "baseline_min_gap_smooth": float(np.min(baseline.gap[smooth_mask])),
+        "boosted_min_gap_smooth": float(np.min(boosted.gap[smooth_mask])),
+        "baseline_mean_gap_smooth": float(np.mean(baseline.gap[smooth_mask])),
+        "boosted_mean_gap_smooth": float(np.mean(boosted.gap[smooth_mask])),
+    }
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Validate ACC controllers against real NGSIM data.")
     parser.add_argument("--controller", choices=list(CONTROLLERS), default="idm")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--plot", metavar="PATH", help="Save a gap/speed plot to this path")
+    parser.add_argument(
+        "--compare-uncertainty-gain", type=float, metavar="GAIN",
+        help="Instead of --controller, compare MpcAccController at gain=0.0 vs. this gain",
+    )
     args = parser.parse_args(argv)
+
+    if args.compare_uncertainty_gain is not None:
+        stats = compare_uncertainty_gain(args.compare_uncertainty_gain, seed=args.seed)
+        print(f"Uncertainty gain:            {args.compare_uncertainty_gain}")
+        print(f"Min gap during decel/stop:  baseline={stats['baseline_min_gap_decel']:.3f} m, "
+              f"boosted={stats['boosted_min_gap_decel']:.3f} m")
+        print(f"Min gap during smooth flow: baseline={stats['baseline_min_gap_smooth']:.3f} m, "
+              f"boosted={stats['boosted_min_gap_smooth']:.3f} m")
+        print(f"Mean gap during smooth flow: baseline={stats['baseline_mean_gap_smooth']:.3f} m, "
+              f"boosted={stats['boosted_mean_gap_smooth']:.3f} m")
+        return
 
     result = validate(args.controller, seed=args.seed)
     print(f"Controller:        {args.controller}")
