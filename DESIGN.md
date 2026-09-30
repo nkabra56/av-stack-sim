@@ -409,6 +409,9 @@ selectable per scenario via `demo.py --controller mpc`.
   traffic-engineering model.
 - Background traffic in the highway scenes (`core/background_traffic.py`) replays the recorded lead car's speed in the
   neighboring lanes with IDM followers behind it. Those cars never change lanes and never react to the ego.
+  One neighboring-lane vehicle is a real exception: `core/nodes/merging_vehicle_node.py`'s
+  `MergingVehicleNode` makes a live gap-acceptance decision off the ego's own state and merges into
+  its lane, and `RadarNode`/`AccControllerNode` genuinely react (Section 12).
 - Scenery (signs, signals, crosswalks, sidewalks, buildings, trees, guardrails) is generated for display only and is
   deterministic, but it is not from any recording. Only the vehicle paths, lane geometry and recorded speeds are.
 
@@ -524,10 +527,9 @@ toward the full `min_gap` whenever that's actually reachable. Measured effect on
 standstill case: realized minimum gap at `min_gap=3.0` improved from 2.44 m (~0.56 m erosion) to
 2.79 m (~0.21 m erosion), and the remaining ~0.21 m was confirmed to trace to `RadarNode`'s own
 measurement noise (`range_std=0.5`), not to any remaining infeasibility, by comparing each tick's
-promised next-step floor against the next tick's *true* realized gap. A full robust/stochastic MPC
-(tightening the constraint by a confidence margin proportional to lead-vehicle prediction
-uncertainty specifically, as opposed to the constraint-feasibility fix here) remains future work,
-noted in Section 12, but is no longer covering for a constraint that could ask for the impossible.
+promised next-step floor against the next tick's *true* realized gap. Tightening the constraint by
+a confidence margin proportional to lead-vehicle prediction uncertainty specifically (as opposed to
+the constraint-feasibility fix here) is now built too; see Section 12.
 
 **Validation** (`validation/ngsim_loader.py`, `validation/acc_validation.py`) replays a real
 NGSIM leader/follower pair's recorded trajectory (US-101 freeway, congested traffic including a
@@ -725,10 +727,32 @@ corrects what's actually about to leave the lane. Brings the full 2D `Vehicle` b
   branches H4's own standalone tests already cover (yield to first-arrived, proceed when ego
   arrived first, yield to the right on simultaneous arrival, don't yield to the left), re-derived
   against this harness's own real approach dynamics rather than reusing H4's timings verbatim.
-- **Robust/stochastic MPC for ACC**, closing the gap noted in Section 11: tighten the gap
-  constraint by a margin proportional to prediction uncertainty instead of a fixed empirically-
-  chosen `min_gap`, so the safety margin adapts to how much the lead vehicle's behavior is
-  actually deviating from the constant-velocity assumption.
+- **Reactive merging vehicle**: `MergingVehicleSpec`/`MergingVehicleNode` is an optional, additive
+  `FullHighwayHarness` parameter (`None` default, every existing caller unaffected). It cruises in
+  the adjacent lane and makes a live gap-acceptance decision off the ego's own `ego_state`, merging
+  into the ego's lane once the gap is wide enough, rather than on a scripted clock.
+  `RadarNode` is generalized to track this second in-lane candidate alongside the recorded lead and
+  report whichever is nearer, so `AccControllerNode` genuinely reacts: a synthetic worst-case merge
+  (a 2m gap at 24 m/s closing speed) never collides across 5 seeds with either controller
+  (`tests/test_merging_vehicle.py`). **Found while building it**: `MpcAccController`'s gap cost
+  penalizes a gap larger than desired exactly as much as one smaller, so with a very large, stable,
+  matched-speed gap (the non-blocking-lead pattern this section already uses to isolate an
+  interaction) it never settles at `v0`, instead accelerating past it. Not fixed here since it's a
+  pre-existing issue unrelated to the merge itself; see KNOWN_BUGS.md entry 9.
+- ~~Robust/stochastic MPC for ACC~~: built. `MpcAccController` tracks an EWMA of the unsigned
+  magnitude of the lead's implied tick-to-tick acceleration (`_update_uncertainty`), a causal proxy
+  for how wrong the rollout's constant-velocity assumption currently is, and an opt-in
+  `uncertainty_gain` (default 0.0, every default and every number already measured elsewhere in
+  this doc unchanged) grows `_effective_min_gap`'s per-horizon-step floor by `0.5 * sigma * (k*dt)^2`
+  at step `k`: the worst-case constant-velocity extrapolation error a lead-acceleration deviation of
+  `sigma` implies. Still capped at the always-feasible emergency-braking floor (KNOWN_BUGS.md
+  entry 1), so the margin can only tighten the constraint, never make it infeasible, verified across
+  gains up to 1000 (`tests/test_acc.py`). **Measured against the real NGSIM trace**
+  (`core.validation.acc_validation.compare_uncertainty_gain`): at `uncertainty_gain=1.0`, the
+  realized minimum gap during the trace's genuine deceleration/full-stop event grows from 2.96 m to
+  4.64 m (+57%), while the minimum gap during a later smooth-flow stretch of the same trace barely
+  moves (9.96 m to 10.05 m, mean gap shifting under 0.05%): the margin activates specifically when
+  the lead's behavior deviates from the constant-velocity assumption, not uniformly.
 - **highD dataset upgrade for H3**: richer, pre-extracted lane geometry and maneuvers than NGSIM
   provides, free for non-commercial use but registration-gated (a manual data-request form, no
   anonymous download), worth it once lane geometry precision actually matters, not required to

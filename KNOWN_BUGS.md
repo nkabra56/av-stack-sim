@@ -319,3 +319,22 @@ correctly delivers the output GIF to the host through the `./out` volume mount. 
 **What would close it further**: nothing is outstanding, because the underlying app behavior (the latency
 margin fix) was never actually broken; only this one test's construction was fragile, on two
 independent axes, both now fixed.
+
+### 9. `MpcAccController` overshoots `v0` with a very large, stable lead gap (open)
+
+**Where**: `core/control/acc.py`, `MpcAccController._cost`.
+**Status**: open, not a collision risk. Every scenario this project actually exercises keeps the
+gap close to `desired_gap`, where the bug can't manifest, and `tests/test_merging_vehicle.py`'s
+worst-case cut-ins confirm the controller still never collides while this is unfixed.
+**Root cause**: `_cost`'s gap term is `(gap - desired_gap)**2`, which penalizes a gap *larger* than
+desired exactly as much as one smaller. With a very large, stable gap and a lead matching `v0` (the
+"effectively non-blocking lead" pattern DESIGN.md section 12 already uses to isolate an
+interaction), that term's gradient dwarfs the speed term, so SLSQP finds it cheaper to keep
+accelerating to shrink an already-safe gap than to hold `v0`. `IDMController` has no such problem:
+its `(s*/gap)^2` term naturally vanishes as the gap grows, so it converges to `v0` correctly.
+**Found while**: building the reactive-merging-vehicle feature (DESIGN.md section 12), which needed
+a synthetic non-blocking lead to isolate the merge's own effect on the ego.
+**What would close it**: make the gap term one-sided, only penalizing a shortfall:
+`gap_shortfall = np.maximum(0.0, desired_gap - gaps)`, then cost on `gap_shortfall ** 2`. Identical
+to today's cost whenever `gap < desired_gap` (every existing blocking-scenario test), and removes
+only the pathological "always accelerate to shrink an oversized gap" incentive.

@@ -1,7 +1,7 @@
 # AV Stack Sim
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-304%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-328%20passing-brightgreen)](tests/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
 A from-scratch autonomous-driving stack in Python: state estimation, motion planning, and control
@@ -52,8 +52,10 @@ python -m http.server 8000 --directory docs/viewer      # then open http://local
 
 The page loads three.js from a CDN, so it needs a network connection. The viewer is illustrative in
 several ways (the parking collision circle is smaller than the drawn car, the highway gap is quantized
-to 2 m waypoints, neighboring-lane traffic never interacts with the ego, and scenery, signs and signals
-are decorative); see [DESIGN.md](DESIGN.md#9-known-limitations--assumptions).
+to 2 m waypoints, most background traffic never interacts with the ego, and scenery, signs and signals
+are decorative); see [DESIGN.md](DESIGN.md#9-known-limitations--assumptions). One neighboring-lane
+vehicle is a real exception: it merges into the ego's lane on a live gap-acceptance decision, and the
+ACC genuinely reacts to it (see DESIGN.md section 12's reactive-merging-vehicle entry).
 
 ## Architecture
 
@@ -119,7 +121,7 @@ validation is simulated on top of it.
 
 ```bash
 pip install -e ".[dev]"
-pytest                                                          # 304 pass; 13 more tests need `rl`/`viz`
+pytest                                                          # 328 pass; 13 more tests need `rl`/`viz`
 ruff check core tests                                           # lint
 
 # Parking
