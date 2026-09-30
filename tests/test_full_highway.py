@@ -179,3 +179,29 @@ def test_does_not_yield_to_a_simultaneous_vehicle_on_the_left():
     result = _run_with_intersection(other)
     assert result.proceed_time is not None
     assert result.proceed_time < 40.0
+
+
+def test_uncertainty_gain_does_not_reduce_safety_margin_against_the_real_lead():
+    """uncertainty_gain=0.0 stays every controller above's default, untouched. This opts a
+    single run into the new margin and checks it against the real leader trace without
+    shrinking the realized safety margin (see tests/test_acc.py for the isolated unit tests)."""
+    pair = load_following_pair()
+    centerline = load_lane_centerline()
+
+    def run(gain: float):
+        harness = FullHighwayHarness(
+            centerline=centerline,
+            lead_position=pair.leader.position,
+            lead_speed=pair.leader.speed,
+            lead_length=pair.leader.length,
+            acc_controller=MpcAccController(v0=20.0, uncertainty_gain=gain),
+            seed=0,
+        )
+        return harness.run()
+
+    baseline = run(0.0)
+    boosted = run(1.0)
+
+    assert not boosted.collided
+    assert boosted.min_gap > 0
+    assert boosted.min_gap >= baseline.min_gap

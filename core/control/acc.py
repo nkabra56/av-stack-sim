@@ -58,6 +58,8 @@ class MpcAccController:
         w_effort: float = 0.05,
         w_jerk: float = 0.1,
         maxiter: int = 30,
+        uncertainty_gain: float = 0.0,  # 0 = today's fixed-min_gap behavior, unchanged
+        uncertainty_ewma_alpha: float = 0.3,  # smoothing for the lead-uncertainty estimate below
     ):
         self.dt = dt
         self.horizon = horizon
@@ -71,7 +73,11 @@ class MpcAccController:
         self.w_effort = w_effort
         self.w_jerk = w_jerk
         self.maxiter = maxiter
+        self.uncertainty_gain = uncertainty_gain
+        self.uncertainty_ewma_alpha = uncertainty_ewma_alpha
         self._warm_start: np.ndarray | None = None
+        self._prev_lead_speed: float | None = None
+        self._lead_uncertainty = 0.0  # EWMA of |implied lead accel|, see _update_uncertainty
 
     def _rollout(self, ego_speed: float, lead_positions: np.ndarray, a_seq: np.ndarray):
         speeds = np.empty(self.horizon)
@@ -92,11 +98,28 @@ class MpcAccController:
         cost += self.w_jerk * np.sum(np.diff(a_seq) ** 2)
         return cost
 
-    def _effective_min_gap(self, ego_speed: float, lead_positions: np.ndarray) -> np.ndarray:
+    def _update_uncertainty(self, lead_speed: float) -> float:
+        """EWMA of the unsigned magnitude of the lead's implied tick-to-tick acceleration: a
+        cheap, causal proxy for how wrong the rollout's constant-velocity assumption is right now."""
+        implied_accel = 0.0 if self._prev_lead_speed is None else (lead_speed - self._prev_lead_speed) / self.dt
+        self._prev_lead_speed = lead_speed
+        self._lead_uncertainty += self.uncertainty_ewma_alpha * (abs(implied_accel) - self._lead_uncertainty)
+        return self._lead_uncertainty
+
+    def _effective_min_gap(self, ego_speed: float, lead_positions: np.ndarray, sigma: float = 0.0) -> np.ndarray:
         """Per-step gap floor that's always achievable (braking at a_min from now), so the
-        SLSQP constraint stays feasible instead of silently violated. See KNOWN_BUGS.md entry 1."""
+        SLSQP constraint stays feasible instead of silently violated. See KNOWN_BUGS.md entry 1.
+
+        `sigma` (smoothed |lead accel|) grows the requirement above `min_gap` when the lead's
+        behavior is deviating from the constant-velocity rollout assumption: if the lead's true
+        accel could plausibly differ by `sigma`, constant-velocity extrapolation can be off by
+        about 0.5 * sigma * t^2 at prediction horizon t. Still capped at the emergency-braking
+        floor, so this can only tighten the requirement, never push it past what's achievable.
+        """
         _, floor = self._rollout(ego_speed, lead_positions, np.full(self.horizon, self.a_min))
-        return np.minimum(self.min_gap, floor)
+        horizon_times = self.dt * np.arange(1, self.horizon + 1)
+        margin = self.uncertainty_gain * 0.5 * sigma * horizon_times**2
+        return np.minimum(self.min_gap + margin, floor)
 
     def _gap_constraint(
         self, a_seq: np.ndarray, ego_speed: float, lead_positions: np.ndarray, effective_min_gap: np.ndarray
@@ -106,7 +129,8 @@ class MpcAccController:
 
     def control(self, ego_speed: float, gap: float, lead_speed: float) -> float:
         lead_positions = gap + lead_speed * self.dt * np.arange(1, self.horizon + 1)
-        effective_min_gap = self._effective_min_gap(ego_speed, lead_positions)
+        sigma = self._update_uncertainty(lead_speed)
+        effective_min_gap = self._effective_min_gap(ego_speed, lead_positions, sigma)
         u0 = self._warm_start if self._warm_start is not None else np.zeros(self.horizon)
         bounds = [(self.a_min, self.a_max)] * self.horizon
         constraints = [
