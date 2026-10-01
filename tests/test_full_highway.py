@@ -48,7 +48,24 @@ def test_never_collides_with_the_lead_vehicle(controller_name, seed):
     composed ACC + Stanley control: same principle as test_acc_validation.py."""
     result, _ = _run(controller_name, seed)
     assert not result.collided
+    assert result.geometric_min_gap > 0
+
+
+@pytest.mark.parametrize("controller_name", list(CONTROLLERS))
+@pytest.mark.parametrize("seed", SEEDS)
+def test_geometric_min_gap_is_meaningfully_larger_than_the_quantized_report(controller_name, seed):
+    """DESIGN.md section 9: 'across the configurations in tests/test_full_highway.py (IDM and
+    MPC-ACC, seeds 1 to 3) the geometric minimum gap is 2.5 to 2.8 m against 1.8 m reported, the
+    reported gap exceeds the geometric one by at most 1.0 m, and no tick has a geometric gap at
+    or below zero.' Proves the quantized min_gap alone would under-report the true margin, which
+    is why the safety assertion above checks geometric_min_gap instead."""
+    result, _ = _run(controller_name, seed)
+    assert not result.collided
     assert result.min_gap > 0
+    assert result.geometric_min_gap > 0
+    assert 0.0 < result.geometric_min_gap - result.min_gap <= 1.0
+    assert 2.0 < result.geometric_min_gap < 3.0
+    assert 1.5 < result.min_gap < 2.5
 
 
 @pytest.mark.parametrize("controller_name", list(CONTROLLERS))
@@ -76,6 +93,7 @@ def test_deterministic_for_a_fixed_seed():
     a, _ = _run("mpc", seed=5)
     b, _ = _run("mpc", seed=5)
     assert a.min_gap == b.min_gap
+    assert a.geometric_min_gap == b.geometric_min_gap
     assert np.array_equal(a.cross_track_error, b.cross_track_error)
 
 
@@ -203,5 +221,5 @@ def test_uncertainty_gain_does_not_reduce_safety_margin_against_the_real_lead():
     boosted = run(1.0)
 
     assert not boosted.collided
-    assert boosted.min_gap > 0
-    assert boosted.min_gap >= baseline.min_gap
+    assert boosted.geometric_min_gap > 0
+    assert boosted.geometric_min_gap >= baseline.geometric_min_gap
