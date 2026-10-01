@@ -524,10 +524,12 @@ clamps the constraint to `min(min_gap, that floor)` at each step rather than one
 whole horizon, so the NLP SLSQP solves is provably feasible at every point, not just wherever
 happened to be easiest. `_cost`'s `desired_gap` term is unchanged, so the optimizer still pulls back
 toward the full `min_gap` whenever that's actually reachable. Measured effect on the same NGSIM
-standstill case: realized minimum gap at `min_gap=3.0` improved from 2.44 m (~0.56 m erosion) to
-2.79 m (~0.21 m erosion), and the remaining ~0.21 m was confirmed to trace to `RadarNode`'s own
-measurement noise (`range_std=0.5`), not to any remaining infeasibility, by comparing each tick's
-promised next-step floor against the next tick's *true* realized gap. Tightening the constraint by
+standstill case, at the time of this fix: realized minimum gap at `min_gap=3.0` improved from
+2.44 m (~0.56 m erosion) to 2.79 m (~0.21 m erosion), and the remaining ~0.21 m was confirmed to
+trace to `RadarNode`'s own measurement noise (`range_std=0.5`), not to any remaining infeasibility,
+by comparing each tick's promised next-step floor against the next tick's *true* realized gap.
+Re-measured after KNOWN_BUGS.md entry 9's later, unrelated cost fix: 2.96 m, left here alongside the
+original figures as historical record rather than silently overwritten. Tightening the constraint by
 a confidence margin proportional to lead-vehicle prediction uncertainty specifically (as opposed to
 the constraint-feasibility fix here) is now built too; see Section 12.
 
@@ -734,11 +736,11 @@ corrects what's actually about to leave the lane. Brings the full 2D `Vehicle` b
   `RadarNode` is generalized to track this second in-lane candidate alongside the recorded lead and
   report whichever is nearer, so `AccControllerNode` genuinely reacts: a synthetic worst-case merge
   (a 2m gap at 24 m/s closing speed) never collides across 5 seeds with either controller
-  (`tests/test_merging_vehicle.py`). **Found while building it**: `MpcAccController`'s gap cost
-  penalizes a gap larger than desired exactly as much as one smaller, so with a very large, stable,
+  (`tests/test_merging_vehicle.py`). **Found while building it**: `MpcAccController`'s gap cost used
+  to penalize a gap larger than desired exactly as much as one smaller, so with a very large, stable,
   matched-speed gap (the non-blocking-lead pattern this section already uses to isolate an
-  interaction) it never settles at `v0`, instead accelerating past it. Not fixed here since it's a
-  pre-existing issue unrelated to the merge itself; see KNOWN_BUGS.md entry 9.
+  interaction) it never settled at `v0`, instead accelerating past it. Fixed separately; see
+  KNOWN_BUGS.md entry 9.
 - ~~Robust/stochastic MPC for ACC~~: built. `MpcAccController` tracks an EWMA of the unsigned
   magnitude of the lead's implied tick-to-tick acceleration (`_update_uncertainty`), a causal proxy
   for how wrong the rollout's constant-velocity assumption currently is, and an opt-in
@@ -748,11 +750,12 @@ corrects what's actually about to leave the lane. Brings the full 2D `Vehicle` b
   `sigma` implies. Still capped at the always-feasible emergency-braking floor (KNOWN_BUGS.md
   entry 1), so the margin can only tighten the constraint, never make it infeasible, verified across
   gains up to 1000 (`tests/test_acc.py`). **Measured against the real NGSIM trace**
-  (`core.validation.acc_validation.compare_uncertainty_gain`): at `uncertainty_gain=1.0`, the
-  realized minimum gap during the trace's genuine deceleration/full-stop event grows from 2.96 m to
-  4.64 m (+57%), while the minimum gap during a later smooth-flow stretch of the same trace barely
-  moves (9.96 m to 10.05 m, mean gap shifting under 0.05%): the margin activates specifically when
-  the lead's behavior deviates from the constant-velocity assumption, not uniformly.
+  (`core.validation.acc_validation.compare_uncertainty_gain`, after KNOWN_BUGS.md entry 9's cost
+  fix): at `uncertainty_gain=1.0`, the realized minimum gap during the trace's genuine
+  deceleration/full-stop event grows from 2.96 m to 4.62 m (+56%), while the minimum gap during a
+  later smooth-flow stretch of the same trace barely moves (9.96 m to 10.05 m, mean gap shifting
+  under 0.05%): the margin activates specifically when the lead's behavior deviates from the
+  constant-velocity assumption, not uniformly.
 - **highD dataset upgrade for H3**: richer, pre-extracted lane geometry and maneuvers than NGSIM
   provides, free for non-commercial use but registration-gated (a manual data-request form, no
   anonymous download), worth it once lane geometry precision actually matters, not required to

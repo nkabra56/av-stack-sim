@@ -93,7 +93,10 @@ class MpcAccController:
     def _cost(self, a_seq: np.ndarray, ego_speed: float, lead_positions: np.ndarray) -> float:
         speeds, gaps = self._rollout(ego_speed, lead_positions, a_seq)
         desired_gap = self.min_gap + self.time_headway * speeds
-        cost = self.w_gap * np.sum((gaps - desired_gap) ** 2) + self.w_speed * np.sum((speeds - self.v0) ** 2)
+        # One-sided: only a shortfall is penalized, or the optimizer keeps accelerating to shrink
+        # an already-safe, oversized gap instead of holding v0. See KNOWN_BUGS.md entry 9.
+        gap_shortfall = np.maximum(0.0, desired_gap - gaps)
+        cost = self.w_gap * np.sum(gap_shortfall**2) + self.w_speed * np.sum((speeds - self.v0) ** 2)
         cost += self.w_effort * np.sum(a_seq**2)
         cost += self.w_jerk * np.sum(np.diff(a_seq) ** 2)
         return cost

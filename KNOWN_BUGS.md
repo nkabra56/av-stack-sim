@@ -320,21 +320,26 @@ correctly delivers the output GIF to the host through the `./out` volume mount. 
 margin fix) was never actually broken; only this one test's construction was fragile, on two
 independent axes, both now fixed.
 
-### 9. `MpcAccController` overshoots `v0` with a very large, stable lead gap (open)
+### 9. `MpcAccController` overshot `v0` with a very large, stable lead gap (closed)
 
 **Where**: `core/control/acc.py`, `MpcAccController._cost`.
-**Status**: open, not a collision risk. Every scenario this project actually exercises keeps the
-gap close to `desired_gap`, where the bug can't manifest, and `tests/test_merging_vehicle.py`'s
-worst-case cut-ins confirm the controller still never collides while this is unfixed.
-**Root cause**: `_cost`'s gap term is `(gap - desired_gap)**2`, which penalizes a gap *larger* than
+**Status**: closed. It was never a collision risk (every scenario this project actually exercises
+keeps the gap close to `desired_gap`, where the bug couldn't manifest, and
+`tests/test_merging_vehicle.py`'s worst-case cut-ins already confirmed the controller never
+collided while this was unfixed), but it was a real design flaw now fixed at the source.
+**Root cause**: `_cost`'s gap term was `(gap - desired_gap)**2`, which penalized a gap *larger* than
 desired exactly as much as one smaller. With a very large, stable gap and a lead matching `v0` (the
 "effectively non-blocking lead" pattern DESIGN.md section 12 already uses to isolate an
-interaction), that term's gradient dwarfs the speed term, so SLSQP finds it cheaper to keep
-accelerating to shrink an already-safe gap than to hold `v0`. `IDMController` has no such problem:
+interaction), that term's gradient dwarfed the speed term, so SLSQP found it cheaper to keep
+accelerating to shrink an already-safe gap than to hold `v0`. `IDMController` had no such problem:
 its `(s*/gap)^2` term naturally vanishes as the gap grows, so it converges to `v0` correctly.
 **Found while**: building the reactive-merging-vehicle feature (DESIGN.md section 12), which needed
 a synthetic non-blocking lead to isolate the merge's own effect on the ego.
-**What would close it**: make the gap term one-sided, only penalizing a shortfall:
-`gap_shortfall = np.maximum(0.0, desired_gap - gaps)`, then cost on `gap_shortfall ** 2`. Identical
-to today's cost whenever `gap < desired_gap` (every existing blocking-scenario test), and removes
-only the pathological "always accelerate to shrink an oversized gap" incentive.
+**Fix**: made the gap term one-sided, only penalizing a shortfall:
+`gap_shortfall = np.maximum(0.0, desired_gap - gaps)`, cost on `gap_shortfall ** 2`. Identical to
+the old cost whenever `gap < desired_gap` (every existing blocking-scenario test): only one scripted
+regression pin moved, by 2e-5 m/s² in its last of 20 steps (`tests/test_acc.py`). Pinned directly
+with `test_mpc_settles_at_v0_with_a_very_large_stable_lead_gap`. Re-measured the real-NGSIM
+uncertainty-margin figures in DESIGN.md section 12 after this fix: unchanged to the reported
+precision except the deceleration-window minimum gap at `uncertainty_gain=1.0`, now 4.62 m rather
+than 4.64 m (still +56%).

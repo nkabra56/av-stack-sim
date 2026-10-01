@@ -48,9 +48,11 @@ def test_mpc_falls_back_to_safe_braking_if_solver_returns_a_constraint_violating
 
 
 def test_mpc_uncertainty_gain_zero_is_bit_for_bit_identical_to_pre_feature_behavior():
-    """Regression pin: uncertainty_gain defaults to 0.0, so this must reproduce the
-    pre-feature MpcAccController's output exactly on this scripted sequence, confirmed by
-    running that version directly and hardcoding its (bit-for-bit identical) result below."""
+    """Regression pin: uncertainty_gain defaults to 0.0, so this must reproduce
+    MpcAccController's current default output exactly on this scripted sequence.
+    Last 2 decimals of the final step moved when KNOWN_BUGS.md entry 9's one-sided gap
+    cost was fixed (that fix changes the optimizer's landscape slightly even here, where
+    the gap never actually exceeds desired_gap by much); every other step is unaffected."""
     dt = 0.1
     n = 20
     t = np.arange(n) * dt
@@ -64,7 +66,7 @@ def test_mpc_uncertainty_gain_zero_is_bit_for_bit_identical_to_pre_feature_behav
     expected = np.array([
         1.4999999999999944, 1.499999999999998, 1.4999999999999973, 1.4999999999999998, 1.5,
         1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5,
-        0.6794041937901282, -1.5786801828018955, -3.622592658105083,
+        0.6794041937901282, -1.5786801828018955, -3.6225869931030257,
     ])
     assert np.array_equal(out, expected)
 
@@ -103,6 +105,19 @@ def test_mpc_uncertainty_gain_grows_realized_min_gap_under_a_jerky_braking_lead(
     min_gap_on = _simulate_min_gap(MpcAccController(uncertainty_gain=1.0), lead_speed_seq)
 
     assert min_gap_on > min_gap_off + 1.0  # a real, not marginal, difference
+
+
+def test_mpc_settles_at_v0_with_a_very_large_stable_lead_gap():
+    """Regression for KNOWN_BUGS.md entry 9: a lead matching v0 with a gap far above
+    desired_gap used to make the two-sided cost accelerate past v0 to shrink an already-safe
+    gap. The one-sided gap-shortfall cost must hold steady at v0 instead."""
+    mpc = MpcAccController(v0=20.0)
+    ego_speed, gap, lead_speed = 20.0, 200.0, 20.0
+    for _ in range(50):
+        accel = mpc.control(ego_speed, gap, lead_speed)
+        ego_speed = max(0.0, ego_speed + accel * mpc.dt)
+        gap += (lead_speed - ego_speed) * mpc.dt
+    assert ego_speed == pytest.approx(20.0, abs=0.05)
 
 
 @pytest.mark.parametrize("uncertainty_gain", [0.0, 0.5, 1.0, 5.0, 50.0, 1000.0])
