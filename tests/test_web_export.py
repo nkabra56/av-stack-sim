@@ -10,6 +10,7 @@ from core.visualization.web_export import (
     _kitti_scene,
     _lane_scene,
     _left_turn_scene,
+    _merging_scene,
     _parking_scene,
     _signalized_scene,
     _stop_sign_scene,
@@ -116,6 +117,21 @@ def test_three_way_scene_has_no_south_leg():
     assert len(scene["decor"]["strips"]) == 3
     assert len([p for p in scene["props"] if p["type"] == "stop_sign"]) == 3
     assert scene["decor"]["boxes"][0]["y"] > 0  # the paved box is shifted toward the legs that exist
+
+
+def test_merging_scene_shows_a_real_lane_change_with_no_collision():
+    """The merging vehicle's exported lane offset must actually cross from the adjacent lane
+    (3.7 m) to the ego's lane (~0), so the merge is visible in the data, not just simulated."""
+    scene = _merging_scene()
+    _assert_consistent(scene)
+    assert "merging" in scene["tracks"]
+    assert any(v["track"] == "merging" for v in scene["vehicles"])
+    offset = scene["signals"]["merge_offset"]
+    assert offset[0] == 3.7
+    assert min(offset) < 0.1
+    assert scene["outcome"]["label"] == "No collision"
+    assert "merging_gap" in scene["signals"]
+    assert any(h["key"] == "merging_gap" for h in scene["hud"])
 
 
 def test_highway_scene_has_lane_markings_rails_and_background_traffic():
