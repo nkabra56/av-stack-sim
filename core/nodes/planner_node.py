@@ -40,7 +40,7 @@ class PlannerNode:
         start = (pose.x, pose.y, pose.theta)
         goal = (self.environment.spot.x, self.environment.spot.y, self.environment.spot.theta)
         try:
-            path = self.planner.plan(start, goal, self.environment.obstacles, self.turning_radius)
+            path = self.planner.plan(start, goal, self.environment.all_obstacles(), self.turning_radius)
         except RuntimeError:
             return  # no route currently exists; keep tracking the last known-good path
         self.bus.publish("path", PathMsg(path))

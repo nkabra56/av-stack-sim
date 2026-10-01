@@ -11,6 +11,7 @@ from core.estimation.ekf import ExtendedKalmanFilter
 from core.interfaces import Controller, Planner
 from core.messaging.bus import Bus
 from core.messaging.messages import ObstacleRangeMsg, PathMsg, PoseEstimateMsg, TrueStateMsg
+from core.moving_obstacle import MovingObstacleSpec, obstacle_at
 from core.nodes.controller_node import ControllerNode
 from core.nodes.estimator_node import EstimatorNode
 from core.nodes.planner_node import PlannerNode
@@ -59,11 +60,13 @@ class ParkingHarness:
         tracking_threshold: float = 0.03,  # see ControllerNode's constructor docstring
         sensor_dropout_prob: float = 0.0,  # see SensorNode's module docstring; 0.0 keeps old behavior
         sensor_latency_ticks: int = 0,
+        moving_obstacles: list[MovingObstacleSpec] | None = None,  # see core/moving_obstacle.py
     ):
         self.environment = environment
         self.tol = tol
         self.dt = dt
         self.bus = Bus()
+        self._moving_obstacle_specs = moving_obstacles or []
         rng = np.random.default_rng(seed)
 
         self.vehicle_node = VehicleNode(self.bus, vehicle, dt, rng, v_max=v_max, a_max=a_max, k_acc=k_acc)
@@ -130,14 +133,16 @@ class ParkingHarness:
         self._latest_ranges = msg
 
     def _collided(self, ts: TrueStateMsg) -> bool:
-        for obstacle in self.environment.obstacles:
+        for obstacle in self.environment.all_obstacles():
             if np.hypot(ts.x - obstacle.x, ts.y - obstacle.y) < obstacle.radius + VEHICLE_RADIUS:
                 return True
         return False
 
     def run(self, max_steps: int = 500, on_tick: Callable[[int], None] | None = None) -> SimulationResult:
         """`on_tick(tick)`, if given, runs before each tick: used by re-planning tests to
-        mutate `self.environment.obstacles` mid-run (KNOWN_BUGS.md entry 3)."""
+        mutate `self.environment.obstacles` mid-run (KNOWN_BUGS.md entry 3). Moving obstacles
+        given at construction need no such hook; `environment.moving_obstacles` is refreshed
+        from them automatically, before `on_tick` runs each tick."""
         true_history: list[tuple[float, float, float]] = []
         est_history: list[tuple[float, float, float]] = []
         cov_history: list[np.ndarray] = []
@@ -146,6 +151,10 @@ class ParkingHarness:
         collision = False
 
         for tick in range(max_steps):
+            if self._moving_obstacle_specs:
+                t = tick * self.dt
+                positions = [obstacle_at(spec, t) for spec in self._moving_obstacle_specs]
+                self.environment.moving_obstacles = [o for o in positions if o is not None]
             if on_tick is not None:
                 on_tick(tick)
             self.vehicle_node.step()
