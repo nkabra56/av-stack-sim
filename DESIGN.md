@@ -396,13 +396,15 @@ selectable per scenario via `demo.py --controller mpc`.
   inside the obstacle's circle. "Fails safe" therefore holds under the simulator's collision model,
   not for the drawn footprint.
 - The highway harness locates the ego by projecting onto the nearest centerline waypoint (waypoints are
-  2 m apart), so its reported gap and `min_gap` carry up to 1 m of quantization error. Across the
-  configurations in `tests/test_full_highway.py` (IDM and MPC-ACC, seeds 1 to 3) the geometric minimum gap is
-  2.5 to 2.8 m against 1.8 m reported, the reported gap exceeds the geometric one by at most 1.0 m, and no tick
-  has a geometric gap at or below zero. Because the error is bounded by 1 m, a run reporting more than 1 m
-  cannot hide an overlap; the tests only assert `min_gap > 0`, so a run reporting less than 1 m could. The 1D
-  harness behind `acc_validation` integrates the ego position directly and has no such error. The viewer
-  draws and reports the geometric gap.
+  2 m apart), so its reported `gap`/`min_gap` carry up to 1 m of quantization error. `core/control/lane_geometry.py`'s
+  `geometric_following_gap` computes the true bumper-to-bumper gap instead, via continuous interpolation
+  along the centerline rather than nearest-waypoint snapping, exposed as `FullHighwaySimulationResult.geometric_gap`/
+  `geometric_min_gap`. `tests/test_full_highway.py`'s collision-safety assertions check this field directly, not
+  the quantized one, closing the soundness gap: a run reporting less than 1 m of quantized gap could
+  previously have hidden a real overlap, since the tests only checked `min_gap > 0`. Across the configurations
+  in that file (IDM and MPC-ACC, seeds 1 to 3), the geometric minimum gap is 2.5 to 2.9 m against 1.8 to 2.0 m
+  reported. The 1D harness behind `acc_validation` integrates the ego position directly and has no such error.
+  The viewer draws and reports the geometric gap, via the same shared function.
 - The signalized-intersection scene (`core/signalized_intersection.py`) is a fixed-time plan with straight-through
   IDM cars only: no turns, pedestrians, actuated timing, or vehicles blocking the box. A car brakes for a yellow only
   if it cannot clear the line first and can stop at 4.5 m/s². It is a demonstration of queueing and safety, not a
@@ -433,12 +435,20 @@ selectable per scenario via `demo.py --controller mpc`.
   `perpendicular_obstructed_lane`) that need a real detour or reverse-gear cusp. A true head-to-head
   under identical noisy conditions, and on the scenarios that actually stress a path-planning
   algorithm, is real follow-up work.
-- ~~Dynamic obstacles requiring re-planning mid-maneuver~~: the re-planning machinery itself is
-  built (KNOWN_BUGS.md entry 3, now closed): stall detection triggers `PlannerNode` to re-plan
-  against the live obstacle list, verified end-to-end with a real closed-loop recovery. What's
-  still missing is genuinely *moving* obstacles (other vehicles, pedestrians in motion): entry 3's
-  scenario is a new *static* obstacle appearing mid-run once, not something that keeps moving after
-  it appears, so a re-plan never has to react to a target that's still changing.
+- ~~Dynamic obstacles requiring re-planning mid-maneuver~~: built, including genuinely *moving*
+  obstacles. The re-planning machinery itself (KNOWN_BUGS.md entry 3, closed) was proven first
+  against a new *static* obstacle appearing mid-run once. `Environment.moving_obstacles` (kept
+  separate from `obstacles` so the EKF's fixed-landmark assumption holds, see Section 5) plus
+  `core/moving_obstacle.py`'s `MovingObstacleSpec`/`obstacle_at()` now give `ParkingHarness` a
+  `moving_obstacles` constructor parameter that animates obstacles over simulation time with no
+  `on_tick` hook needed. `core/scenarios/pedestrian_crossing.py` demonstrates a pedestrian crossing
+  the drive aisle mid-maneuver, forcing a real re-plan against its *live* position, not its start
+  position (`tests/test_moving_obstacle.py` spies on the planner's actual call arguments across two
+  successive re-plans to prove this). **Found while building it**: the speed governor's braking
+  model has no notion of an obstacle's own closing velocity, only the ego's; a moving obstacle that
+  keeps walking into an already-valid detour can hold the ego's speed just above the stall threshold
+  indefinitely, so no re-plan is ever requested while the obstacle's own motion closes the remaining
+  gap. Open, not fixed; see KNOWN_BUGS.md entry 10.
 - ~~Sensor dropout/latency modeling~~: built. `SensorNode` can drop each tick's messages or delay them.
   Latency beyond ~10 ticks remains an open limitation (KNOWN_BUGS.md entry 7).
 - ~~Particle filter or UKF as an alternative to the EKF~~: built (`core/estimation/ukf.py`); the UKF was chosen over a particle filter since this domain never actually has a multi-modal belief (one
@@ -740,7 +750,10 @@ corrects what's actually about to leave the lane. Brings the full 2D `Vehicle` b
   to penalize a gap larger than desired exactly as much as one smaller, so with a very large, stable,
   matched-speed gap (the non-blocking-lead pattern this section already uses to isolate an
   interaction) it never settled at `v0`, instead accelerating past it. Fixed separately; see
-  KNOWN_BUGS.md entry 9.
+  KNOWN_BUGS.md entry 9. Now also visualized in the 3D viewer's `highway-merge` scene: the merge
+  triggers early, while the recorded NGSIM leader has the ego in stop-and-go traffic, then the
+  ego's recovering speed later catches up to the merging vehicle, and the radar switches targets
+  from the recorded leader to it, braking to hold a safe gap.
 - ~~Robust/stochastic MPC for ACC~~: built. `MpcAccController` tracks an EWMA of the unsigned
   magnitude of the lead's implied tick-to-tick acceleration (`_update_uncertainty`), a causal proxy
   for how wrong the rollout's constant-velocity assumption currently is, and an opt-in

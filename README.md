@@ -1,7 +1,7 @@
 # AV Stack Sim
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-329%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-355%20passing-brightgreen)](tests/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
 A from-scratch autonomous-driving stack in Python: state estimation, motion planning, and control
@@ -10,7 +10,7 @@ for **parking** (Dubins, Reeds-Shepp, Hybrid A*, Pure Pursuit, MPC) and **highwa
 node graph and one Extended Kalman Filter, and are validated against real KITTI and NGSIM
 driving data rather than synthetic noise alone.
 
-**[Open the interactive 3D viewer](https://nkabra56.github.io/av-stack-sim/viewer/)**: fourteen
+**[Open the interactive 3D viewer](https://nkabra56.github.io/av-stack-sim/viewer/)**: fifteen
 replayable runs in your browser, no install.
 
 ![perpendicular parking demo](docs/media/perpendicular_open.gif)
@@ -25,10 +25,11 @@ estimate with its 1σ ellipse. The fan is the ultrasonic sensor array.*
 
 ## Interactive 3D viewer
 
-A browser replay of fourteen runs on roads that look like roads: lane markings, guardrails,
+A browser replay of fifteen runs on roads that look like roads: lane markings, guardrails,
 crosswalks, sidewalks, STOP signs, working traffic signals, street lights, trees, buildings, and
-other cars with brake lights. Three runs are parking. Seven are highway and intersection driving:
-car following behind recorded NGSIM traffic (MPC and IDM) with cars in the neighboring lanes, a stop
+other cars with brake lights. Three runs are parking. Eight are highway and intersection driving:
+car following behind recorded NGSIM traffic (MPC and IDM) with cars in the neighboring lanes, a car
+merging into the ego's lane on a live gap-acceptance decision that forces a real ACC reaction, a stop
 sign, a four-way stop, a T intersection, a left turn, and a fixed-time signalized intersection. Four
 use real data: two KITTI drives, our controller beside a recorded human follower, and lane centering
 on a real lane. Each scene lists what to watch and what is real versus simulated. Cars carry name
@@ -121,7 +122,7 @@ validation is simulated on top of it.
 
 ```bash
 pip install -e ".[dev]"
-pytest                                                          # 329 pass; 13 more tests need `rl`/`viz`
+pytest                                                          # 355 pass; 13 more tests need `rl`/`viz`
 ruff check core tests                                           # lint
 
 # Parking

@@ -343,3 +343,24 @@ with `test_mpc_settles_at_v0_with_a_very_large_stable_lead_gap`. Re-measured the
 uncertainty-margin figures in DESIGN.md section 12 after this fix: unchanged to the reported
 precision except the deceleration-window minimum gap at `uncertainty_gain=1.0`, now 4.62 m rather
 than 4.64 m (still +56%).
+
+### 10. Speed governor doesn't account for a moving obstacle's own closing velocity (open)
+
+**Where**: `core/nodes/controller_node.py`'s `_safe_speed`.
+**Status**: open. Not every moving-obstacle scenario is unsafe (`tests/test_moving_obstacle.py`
+holds 0/10 collisions across seeds with its default pedestrian-crossing timing), but a specific,
+reproducible timing offset collides, with zero re-plans attempted before contact.
+**Symptom**: braking distance is computed from `sqrt(2*a_max*gap)`, the ego's own kinematics
+against the instantaneously-sensed range: correct for a static obstacle (entries 2 and 3), but
+blind to how fast the obstacle it's braking for is itself closing the gap. A moving obstacle that
+keeps walking into an already-valid detour can hold the ego's speed just above `STALL_SPEED`
+indefinitely, so `ControllerNode` never accumulates `STALL_TICKS` consecutive stalled ticks and
+never requests a re-plan, while the obstacle's own motion closes the remaining distance.
+**Repro**: `tests/test_moving_obstacle.py::test_known_limitation_a_fast_closing_pedestrian_can_still_make_contact`,
+pinned as an explicit, documented failure rather than silently passing.
+**What would close it**: a closing-velocity or range-rate signal from the sensor model (today's
+`UltrasonicArray` reports range only), plus a seed sweep re-tuning `stopping_buffer`/`STALL_TICKS`
+against it at the same rigor entry 3 used. `ControllerNode` is shared by every parking scenario, so
+this needs its own validation pass, not a rushed change riding on the moving-obstacle feature.
+**Found while**: building `core/moving_obstacle.py` and `core/scenarios/pedestrian_crossing.py`
+(DESIGN.md section 10's "dynamic obstacles" entry).
