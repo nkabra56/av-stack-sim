@@ -354,3 +354,8 @@ class FullHighwayHarness:
             geometric_merging_gap=geometric_merging_gap,
             min_geometric_merging_gap=min_geometric_merging_gap,
         )
+
+
+# The viewer scene's merge: it cuts in early (during the recorded leader's stop), then the
+# ego's recovering speed catches up to it late in the drive. See web_export.py's _merging_scene().
+NGSIM_VIEWER_MERGE_SCENARIO = MergingVehicleSpec(initial_gap_ahead_of_ego=0.0, speed=6.5, gap_threshold=12.0)

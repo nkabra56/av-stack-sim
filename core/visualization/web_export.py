@@ -16,7 +16,7 @@ from core.control.intersection_geometry import EAST, NORTH, SOUTH, WEST
 from core.control.lane_geometry import build_arc_length_table, geometric_following_gap
 from core.demo import CONTROLLERS, PLANNERS
 from core.environment import VEHICLE_RADIUS
-from core.full_highway_harness import FullHighwayHarness
+from core.full_highway_harness import NGSIM_VIEWER_MERGE_SCENARIO, FullHighwayHarness
 from core.harness import ParkingHarness
 from core.intersection2d_harness import VehicleSpec, run_multi_approach_scenario
 from core.intersection_harness import other_vehicle_present_from
@@ -266,6 +266,127 @@ def _follow_scene(scene_id: str, controller_name: str, title: str, subtitle: str
             "The lead car's motion, the lane geometry, and the flow that drives the other lanes.",
             "The ego (controller, sensors, EKF) and the cars in the other lanes (IDM followers, no lane changes). "
             "The road furniture is illustrative."),
+    }
+
+
+@dataclass
+class _MergingRun:
+    pair: object
+    centerline: np.ndarray
+    table: np.ndarray
+    result: object
+    ego: tuple
+    lead: tuple
+    merging: tuple
+    gap: np.ndarray  # geometric bumper-to-bumper gap to the recorded leader, as in _FollowRun
+
+
+@cache
+def _merging_run() -> _MergingRun:
+    controller = MpcAccController(v0=20.0)
+    pair = load_following_pair()
+    centerline = load_lane_centerline()
+    table = build_arc_length_table(centerline)
+    lead_len = pair.leader.length
+    harness = FullHighwayHarness(
+        centerline=centerline, lead_position=pair.leader.position, lead_speed=pair.leader.speed,
+        lead_length=lead_len, acc_controller=controller, seed=1,
+        merging_vehicle=NGSIM_VIEWER_MERGE_SCENARIO,
+    )
+    r = harness.run()
+
+    half = VEHICLE_LENGTH / 2
+    ego = (r.ego_x - half * np.cos(r.ego_theta), r.ego_y - half * np.sin(r.ego_theta), r.ego_theta)
+    lead = _pose_on_lane(r.lead_position - lead_len / 2, centerline, table)
+    rear_x = lead[0] - lead_len / 2 * np.cos(lead[2])
+    rear_y = lead[1] - lead_len / 2 * np.sin(lead[2])
+    gap = (rear_x - r.ego_x) * np.cos(r.ego_theta) + (rear_y - r.ego_y) * np.sin(r.ego_theta)
+
+    # Place the merging vehicle at its arc-length position, then shift it off the centerline by
+    # its live lane offset: same perpendicular-shift convention scenery.py uses for lane lines.
+    merge_len = NGSIM_VIEWER_MERGE_SCENARIO.length
+    mx, my, mth = _pose_on_lane(r.merging_position - merge_len / 2, centerline, table)
+    merging = (mx - r.merging_lane_offset * np.sin(mth), my + r.merging_lane_offset * np.cos(mth), mth)
+
+    return _MergingRun(pair, centerline, table, r, ego, lead, merging, gap)
+
+
+def _merging_scene() -> dict:
+    run = _merging_run()
+    r = run.result
+    speed = np.asarray(r.ego_speed)
+    merge_start_tick = int(np.where(r.merging_lane_offset < NGSIM_VIEWER_MERGE_SCENARIO.initial_lane_offset)[0][0])
+    full_merge_tick = int(np.where(r.merging_lane_offset <= 0.0)[0][0])
+    # The radar (and thus the ACC) only switches to the merging vehicle once it is the nearer
+    # in-lane target; the peak brake before that tick is the recorded leader's, not this merge's.
+    switch_tick = full_merge_tick + int(np.where(r.merging_gap[full_merge_tick:] < r.gap[full_merge_tick:])[0][0])
+    peak_brake = float(r.ego_accel[switch_tick:].min())
+
+    return {
+        "id": "highway-merge",
+        "group": "Highway and intersections",
+        "title": "A car merges into the ego's lane",
+        "subtitle": "MPC-ACC + Stanley, reactive merge on NGSIM US-101",
+        "blurb": (
+            "A background car in the next lane watches the ego's live position and cuts in once its own "
+            "gap ahead of the ego crosses a threshold: a real decision, not a scripted cut-in time. It merges "
+            "early, while the recorded leader has the ego in stop-and-go traffic; later, as the ego's speed "
+            "recovers, it closes on the now-slower merging vehicle and the MPC-ACC brakes hard to hold a safe gap."
+        ),
+        "kind": "highway",
+        "ground": GRASS,
+        "grid": False,
+        "dt": 0.1,
+        "n": len(r.times),
+        "outcome": {
+            "label": "No collision",
+            "tone": "ok",
+            "detail": (
+                f"The merge trigger fires at {merge_start_tick * r.times[1]:.0f} s. Once the ego's speed recovers "
+                f"from the recorded stop, its radar locks onto the now-closer merging vehicle at "
+                f"{switch_tick * r.times[1]:.0f} s and brakes at up to {abs(peak_brake):.1f} m/s^2, holding a "
+                f"minimum gap of {r.min_merging_gap:.1f} m. The recorded leader, no longer tracked, pulls away "
+                f"to {r.gap[-1]:.0f} m by the end."
+            ),
+        },
+        "road": _highway_road(run.centerline, HIGHWAY_OFFSETS),
+        "props": scenery.highway_props(run.centerline, run.table, HIGHWAY_OFFSETS, LANE_WIDTH, seed=8),
+        "tracks": {"ego": _track(*run.ego), "lead": _track(*run.lead), "merging": _track(*run.merging)},
+        "vehicles": [
+            _car("ego", BLUE, "Ego vehicle", steer="delta", tag="Ego"),
+            {**_car("lead", GRAY, "Lead vehicle (recorded human driver)", tag="Lead"), "length": run.pair.leader.length,
+             "width": 1.9},
+            {**_car("merging", ORANGE, "Merging vehicle", tag="Merge"), "length": NGSIM_VIEWER_MERGE_SCENARIO.length},
+        ],
+        "gap_pair": {"front": "lead", "rear": "ego", "key": "gap"},
+        "trails": [{"track": "ego", "color": BLUE}, {"track": "merging", "color": ORANGE}],
+        "signals": {
+            "v": _arr(speed), "delta": _arr(r.ego_delta, 4), "gap": _arr(run.gap, 2), "lead_v": _arr(r.lead_speed),
+            "cte": _arr(r.cross_track_error, 3), "accel": _arr(r.ego_accel, 2),
+            "merging_gap": _arr(r.merging_gap, 2), "merging_v": _arr(r.merging_speed, 1),
+            "merge_offset": _arr(r.merging_lane_offset, 2),
+        },
+        "hud": [
+            {"key": "v", "label": "Ego speed", "unit": "m/s", "fmt": 1},
+            {"key": "lead_v", "label": "Lead speed", "unit": "m/s", "fmt": 1},
+            {"key": "gap", "label": "Gap to lead", "unit": "m", "fmt": 1},
+            {"key": "merging_v", "label": "Merging vehicle speed", "unit": "m/s", "fmt": 1},
+            {"key": "merging_gap", "label": "Gap to merging vehicle", "unit": "m", "fmt": 1},
+            {"key": "accel", "label": "Acceleration", "unit": "m/s²", "fmt": 1},
+            {"key": "cte", "label": "Lane offset", "unit": "m", "fmt": 2},
+        ],
+        "watch": [
+            "The orange car cruises in the right lane, then cuts into the ego's lane once its own gap ahead "
+            "of the ego crosses a threshold: a live decision, not a fixed time.",
+            "Watch the gap to the merging vehicle in the panel: it grows once the merge completes, then shrinks "
+            "hard as the ego's recovering speed catches up to the merging vehicle's slower, constant speed.",
+            "Once the ego locks onto the closer merging vehicle, it stops tracking the recorded leader, whose "
+            "gap balloons since it is no longer being followed.",
+        ],
+        "provenance": _prov(
+            "The recorded leader's motion and the lane geometry (NGSIM US-101).",
+            "The ego (controller, sensors, EKF, Stanley) and the merging vehicle: its initial gap, speed, "
+            "gap-acceptance trigger and lane-change timing are all simulated, not drawn from real data."),
     }
 
 
@@ -688,6 +809,7 @@ def build_scenes() -> list[dict]:
             "highway-idm", "idm", "Highway following with IDM", "IDM-ACC + Stanley on NGSIM US-101",
             "The same recorded leader, lane and sensor noise, with the closed-form Intelligent Driver Model "
             "in place of MPC. Only the acceleration controller changes."),
+        _merging_scene,
         _stop_sign_scene,
         _four_way_scene,
         _three_way_scene,
