@@ -78,7 +78,7 @@ class SensorNode:
         self._tick += 1
         self._release_due_messages()
 
-        obstacle_readings = self.ultrasonic.sense(ts, self.environment.obstacles)
+        obstacle_readings = self.ultrasonic.sense(ts, self.environment.all_obstacles())
         self._publish_or_defer("obstacle_ranges", ObstacleRangeMsg(obstacle_readings))
 
         compass_meas = wrap_angle(ts.theta + self.rng.normal(0.0, self.compass_std))
@@ -90,6 +90,8 @@ class SensorNode:
             self._publish_or_defer("position_fix", PositionFixMsg(x_meas, y_meas))
 
         readings = []
+        # Deliberately `obstacles` only, never `all_obstacles()`: a moving obstacle is not a
+        # valid EKF landmark (see Environment.moving_obstacles's docstring).
         for landmark_id, obstacle in enumerate(self.environment.obstacles):
             dx, dy = obstacle.x - ts.x, obstacle.y - ts.y
             true_range = np.hypot(dx, dy)

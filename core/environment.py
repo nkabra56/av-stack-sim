@@ -33,6 +33,14 @@ class Spot:
 class Environment:
     spot: Spot
     obstacles: list[Obstacle] = field(default_factory=list)
+    # Obstacles that move over time (core/moving_obstacle.py), kept separate from `obstacles`
+    # since the EKF assumes fixed/known landmarks (DESIGN.md section 1): see all_obstacles().
+    moving_obstacles: list[Obstacle] = field(default_factory=list)
 
     def obstacle_tuples(self) -> list[tuple[float, float, float]]:
         return [o.as_tuple() for o in self.obstacles]
+
+    def all_obstacles(self) -> list[Obstacle]:
+        """Everything that must be avoided/collision-checked/ranged: static + moving.
+        Never use this for EKF landmarks; see the `moving_obstacles` field comment."""
+        return self.obstacles + self.moving_obstacles
