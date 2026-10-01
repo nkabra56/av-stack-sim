@@ -9,7 +9,7 @@ import numpy as np
 
 from core.control.intersection import IntersectionNavigator, IntersectionState
 from core.control.lane_centering import StanleyController
-from core.control.lane_geometry import build_arc_length_table, pose_at_arc_length
+from core.control.lane_geometry import build_arc_length_table, geometric_following_gap, pose_at_arc_length
 from core.estimation.ekf import ExtendedKalmanFilter
 from core.intersection_harness import no_other_vehicle
 from core.messaging.bus import Bus
@@ -74,6 +74,12 @@ class FullHighwaySimulationResult:
     ego_stop_time: float | None = None
     ran_stop_sign: bool | None = None  # crossed the stop line without stopping (see intersection_harness.py)
     proceed_time: float | None = None  # first tick state became PROCEEDING
+    # True bumper-to-bumper gap, free of the ego arc-length quantization above (DESIGN.md section 9):
+    geometric_gap: np.ndarray | None = None
+    geometric_min_gap: float | None = None
+    # Set only when merging_vehicle is given, None otherwise; same in-lane filter as min_merging_gap:
+    geometric_merging_gap: np.ndarray | None = None
+    min_geometric_merging_gap: float | None = None
 
 
 class FullHighwayHarness:
@@ -294,6 +300,29 @@ class FullHighwayHarness:
 
         ego_stop_time = self.intersection_node.navigator.stop_time if self.has_intersection else None
 
+        ego_x_a, ego_y_a, ego_theta_a = np.array(ego_x), np.array(ego_y), np.array(ego_theta)
+        geometric_gap = geometric_following_gap(
+            ego_x_a, ego_y_a, ego_theta_a, np.array(lead_pos), self.lead_length,
+            self.centerline, self.arc_length_table,
+        )
+        geometric_min_gap = float(geometric_gap.min()) if geometric_gap.size else float("inf")
+
+        geometric_merging_gap = None
+        min_geometric_merging_gap = None
+        if self.merging_vehicle_node is not None:
+            # Only meaningful while the merging vehicle's arc length stays within centerline's
+            # own recorded range (see pose_at_arc_length_interpolated's docstring); a scenario
+            # that drives it past the end gets a silently clamped, meaningless pose instead.
+            geometric_merging_gap = geometric_following_gap(
+                ego_x_a, ego_y_a, ego_theta_a, np.array(merging_pos), self.merging_vehicle_length,
+                self.centerline, self.arc_length_table,
+            )
+            # Same in-lane filter min_merging_gap uses: side-by-side during the lane change isn't a near-miss.
+            in_lane = np.abs(np.array(merging_offset)) < IN_LANE_TOLERANCE
+            min_geometric_merging_gap = (
+                float(geometric_merging_gap[in_lane].min()) if np.any(in_lane) else float("inf")
+            )
+
         return FullHighwaySimulationResult(
             times=np.array(times),
             ego_x=np.array(ego_x),
@@ -320,4 +349,8 @@ class FullHighwayHarness:
             ego_stop_time=ego_stop_time,
             ran_stop_sign=ran_stop_sign,
             proceed_time=proceed_time,
+            geometric_gap=geometric_gap,
+            geometric_min_gap=geometric_min_gap,
+            geometric_merging_gap=geometric_merging_gap,
+            min_geometric_merging_gap=min_geometric_merging_gap,
         )
