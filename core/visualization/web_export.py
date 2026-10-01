@@ -298,9 +298,7 @@ def _merging_run() -> _MergingRun:
     half = VEHICLE_LENGTH / 2
     ego = (r.ego_x - half * np.cos(r.ego_theta), r.ego_y - half * np.sin(r.ego_theta), r.ego_theta)
     lead = _pose_on_lane(r.lead_position - lead_len / 2, centerline, table)
-    rear_x = lead[0] - lead_len / 2 * np.cos(lead[2])
-    rear_y = lead[1] - lead_len / 2 * np.sin(lead[2])
-    gap = (rear_x - r.ego_x) * np.cos(r.ego_theta) + (rear_y - r.ego_y) * np.sin(r.ego_theta)
+    gap = geometric_following_gap(r.ego_x, r.ego_y, r.ego_theta, r.lead_position, lead_len, centerline, table)
 
     # Place the merging vehicle at its arc-length position, then shift it off the centerline by
     # its live lane offset: same perpendicular-shift convention scenery.py uses for lane lines.
