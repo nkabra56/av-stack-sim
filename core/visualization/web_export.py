@@ -361,7 +361,9 @@ def _merging_scene() -> dict:
         "signals": {
             "v": _arr(speed), "delta": _arr(r.ego_delta, 4), "gap": _arr(run.gap, 2), "lead_v": _arr(r.lead_speed),
             "cte": _arr(r.cross_track_error, 3), "accel": _arr(r.ego_accel, 2),
-            "merging_gap": _arr(r.merging_gap, 2), "merging_v": _arr(r.merging_speed, 1),
+            # abs(): while still in the adjacent lane, the slower merging vehicle briefly falls
+            # behind the ego, which would otherwise show as a confusing negative "gap" on screen.
+            "merging_gap": _arr(np.abs(r.merging_gap), 2), "merging_v": _arr(r.merging_speed, 1),
             "merge_offset": _arr(r.merging_lane_offset, 2),
         },
         "hud": [
@@ -369,7 +371,7 @@ def _merging_scene() -> dict:
             {"key": "lead_v", "label": "Lead speed", "unit": "m/s", "fmt": 1},
             {"key": "gap", "label": "Gap to lead", "unit": "m", "fmt": 1},
             {"key": "merging_v", "label": "Merging vehicle speed", "unit": "m/s", "fmt": 1},
-            {"key": "merging_gap", "label": "Gap to merging vehicle", "unit": "m", "fmt": 1},
+            {"key": "merging_gap", "label": "Distance to merging vehicle", "unit": "m", "fmt": 1},
             {"key": "accel", "label": "Acceleration", "unit": "m/s²", "fmt": 1},
             {"key": "cte", "label": "Lane offset", "unit": "m", "fmt": 2},
         ],
